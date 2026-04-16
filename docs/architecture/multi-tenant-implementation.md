@@ -650,3 +650,357 @@ graph TB
 | `database/migrations/central/` | Central DB 迁移（13 个） |
 | `database/migrations/tenant/` | Tenant DB 迁移（19 个） |
 
+---
+
+## Phase M2 商户管理核心架构
+
+> **版本**: v2.0  
+> **日期**: 2026-04-17  
+> **里程碑**: Phase M2 — 商户管理核心功能
+
+---
+
+### 1. 商户认证体系
+
+Phase M2 为商户后台引入独立的第三套 Sanctum Guard，与平台管理的 `admin` guard 和前台的 `web` guard 完全隔离。
+
+**Guard 配置（`config/auth.php`）：**
+
+```php
+// Guards
+'merchant' => [
+    'driver'   => 'sanctum',
+    'provider' => 'merchant_users',
+],
+
+// Providers
+'merchant_users' => [
+    'driver' => 'eloquent',
+    'model'  => App\Models\Central\MerchantUser::class,
+],
+```
+
+**认证相关控制器：**
+
+| 控制器 | 路由可见性 | 职责 |
+|--------|-----------|------|
+| `RegisterController` | 公开（无需认证） | 商户注册（创建商户 + 主账号） |
+| `AuthController` | login 公开，其余需认证 | login / logout / me / refresh |
+
+**LoginRequest 验证规则：**
+
+```php
+'email'    => ['required', 'email'],
+'password' => ['required', 'string', 'min:8'],
+```
+
+**认证流程：**
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant AuthController
+    participant MerchantUser
+    participant Sanctum
+
+    Client->>AuthController: POST /merchant/auth/login
+    AuthController->>MerchantUser: Auth::guard('merchant')->attempt()
+    MerchantUser-->>AuthController: MerchantUser instance
+    AuthController->>Sanctum: createToken('merchant-token')
+    Sanctum-->>Client: { token, user, merchant }
+```
+
+---
+
+### 2. 商户 CRUD 与状态管理
+
+**MerchantService 方法清单：**
+
+| 方法 | 说明 |
+|------|------|
+| `register(array $data)` | 商户注册（创建 Merchant + 主账号 MerchantUser） |
+| `getMerchant(int $id)` | 获取商户详情（含关联数据） |
+| `updateMerchant(Merchant $merchant, array $data)` | 更新商户基本信息 |
+| `listMerchants(array $filters)` | 分页列表（支持状态/等级/关键词过滤） |
+| `changeStatus(Merchant $merchant, int $status, ?string $reason)` | 变更商户状态 |
+| `updateLevel(Merchant $merchant, string $level)` | 升降级（含配额校验） |
+| `review(Merchant $merchant, string $action, ?string $note)` | 审核（approve/reject/request_info） |
+
+**商户状态整型映射：**
+
+| 整型值 | 字符串常量 | 含义 |
+|--------|-----------|------|
+| 0 | `pending` | 待审核 |
+| 1 | `active` | 正常运营 |
+| 2 | `suspended` | 暂停（临时限制） |
+| 3 | `banned` | 永久封禁 |
+| 4 | `reviewing` | 审核中 |
+| 5 | `rejected` | 审核拒绝 |
+
+**等级站点配额上限：**
+
+| 等级 | 最大站点数 |
+|------|----------|
+| `starter` | 2 |
+| `standard` | 5 |
+| `advanced` | 10 |
+| `vip` | 无限制（null） |
+
+---
+
+### 3. 站点管理
+
+**StoreService 职责：**
+
+`StoreService` 是站点管理的统一门面，封装 `StoreProvisioningService`（底层创建/销毁）并提供完整的 CRUD 与配置管理能力。
+
+```mermaid
+graph LR
+    AdminStoreController --> StoreService
+    StoreService --> StoreProvisioningService
+    StoreService --> StoreRepository
+    StoreService --> ConfigManager
+```
+
+**Admin StoreController 接口（共 14 个）：**
+
+| # | Method | URI | 说明 |
+|---|--------|-----|------|
+| 1 | GET | `/admin/merchants/{merchant}/stores` | 列出商户所有站点 |
+| 2 | POST | `/admin/merchants/{merchant}/stores` | 为商户创建站点 |
+| 3 | GET | `/admin/merchants/{merchant}/stores/{store}` | 站点详情 |
+| 4 | PUT | `/admin/merchants/{merchant}/stores/{store}` | 更新站点基本信息 |
+| 5 | DELETE | `/admin/merchants/{merchant}/stores/{store}` | 删除（下线）站点 |
+| 6 | POST | `/admin/merchants/{merchant}/stores/{store}/activate` | 激活站点 |
+| 7 | POST | `/admin/merchants/{merchant}/stores/{store}/deactivate` | 停用站点 |
+| 8 | POST | `/admin/merchants/{merchant}/stores/{store}/maintenance` | 进入维护模式 |
+| 9 | GET | `/admin/merchants/{merchant}/stores/{store}/config` | 获取站点配置 |
+| 10 | PUT | `/admin/merchants/{merchant}/stores/{store}/config` | 更新站点配置 |
+| 11 | GET | `/admin/merchants/{merchant}/stores/{store}/domains` | 获取域名列表 |
+| 12 | POST | `/admin/merchants/{merchant}/stores/{store}/domains` | 添加域名 |
+| 13 | DELETE | `/admin/merchants/{merchant}/stores/{store}/domains/{domain}` | 移除域名 |
+| 14 | GET | `/admin/stores` | 全平台站点列表（可跨商户过滤） |
+
+**站点归属验证：** 所有 `{store}` 路由参数均通过路由模型绑定校验 `store.merchant_id === merchant.id`，防止越权访问。
+
+---
+
+### 4. RSA 密钥管理
+
+**MerchantKeyService 核心机制：**
+
+```mermaid
+sequenceDiagram
+    participant Admin
+    participant MerchantKeyService
+    participant OpenSSL
+    participant DB as Central DB
+    participant Cache as Redis Cache
+
+    Admin->>MerchantKeyService: generateKeyPair(merchant)
+    MerchantKeyService->>OpenSSL: openssl_pkey_new(['bits'=>4096])
+    OpenSSL-->>MerchantKeyService: 私钥资源 + 公钥字符串
+    MerchantKeyService->>DB: 存储公钥（jh_merchant_api_keys）
+    MerchantKeyService->>Cache: AES-256-GCM 加密私钥 (TTL=25h)
+    MerchantKeyService-->>Admin: { public_key, download_token }
+```
+
+**私钥安全存储策略：**
+
+| 数据 | 存储位置 | 说明 |
+|------|---------|------|
+| 公钥 | Central DB（`jh_merchant_api_keys`） | 明文存储，用于验签 |
+| 私钥 | Redis Cache（AES-256-GCM 加密） | TTL=25h，**不落库** |
+| 下载令牌 | Redis Cache | SHA-256 哈希，一次性使用，24h 有效 |
+
+**密钥轮换流程：**
+
+```
+旧密钥 → 状态变更为 rotating
+        ↓
+生成新密钥对 → 新密钥 active
+        ↓
+旧密钥进入 Grace Period（24h）
+        ↓
+24h 后旧密钥标记 revoked（定时任务清理）
+```
+
+---
+
+### 5. 商户审核流程
+
+**MerchantService::review() 审核动作：**
+
+| 动作 | 触发条件 | 后续操作 |
+|------|---------|----------|
+| `approve` | 审核通过 | 状态 → `active`，自动创建商户专属数据库 |
+| `reject` | 审核拒绝 | 状态 → `rejected`，记录拒绝原因 |
+| `request_info` | 需补充资料 | 状态 → `reviewing`，向商户发送通知 |
+
+**approve 时的自动数据库创建：**
+
+`MerchantService::approve()` 调用 `MerchantDatabaseService::createMerchantDatabase(merchant)` 自动创建商户专属数据库 `jerseyholic_merchant_{id}`，该库包含以下基础表：
+
+| 表名 | 说明 |
+|------|------|
+| `master_products` | 商品主数据（平台侧） |
+| `master_product_translations` | 商品多语言翻译 |
+| `sync_rules` | 商品同步规则配置 |
+
+**审核日志：** 每次 `review()` 操作均写入 `MerchantAuditLog`，记录操作人、动作、备注及时间戳。
+
+---
+
+### 6. 权限隔离
+
+**MerchantStoreAccess 中间件工作原理：**
+
+文件：`app/Http/Middleware/MerchantStoreAccess.php`
+
+该中间件实现三级 `store_id` 获取策略，确保商户只能访问自己名下的站点：
+
+```mermaid
+graph TB
+    Request --> Step1{1. 路由参数<br/>route('store_id')}
+    Step1 -->|有| Validate
+    Step1 -->|无| Step2{2. X-Store-Id Header}
+    Step2 -->|有| Validate
+    Step2 -->|无| Step3{3. query/body store_id}
+    Step3 -->|有| Validate
+    Step3 -->|无| Error403[403 STORE_ID_REQUIRED]
+    Validate --> CheckOwner{store.merchant_id<br/>== auth merchant?}
+    CheckOwner -->|是| CheckPerm{用户权限检查}
+    CheckOwner -->|否| Error403B[403 STORE_ACCESS_DENIED]
+    CheckPerm -->|通过| Inject[注入 current_store<br/>+ current_merchant]
+    CheckPerm -->|失败| Error403C[403 PERMISSION_DENIED]
+    Inject --> Next[next(request)]
+```
+
+**注入的请求属性：**
+
+```php
+$request->attributes->set('current_store', $store);
+$request->attributes->set('current_merchant', $merchant);
+```
+
+---
+
+### 7. 状态级联
+
+**MerchantStatusCascadeService 行为矩阵：**
+
+| 商户状态变更 | 站点影响 | API 密钥 | 资金 |
+|------------|---------|---------|------|
+| → `suspended` | 所有站点 → `maintenance` | 不吊销 | 不冻结 |
+| → `banned` | 所有站点 → `inactive` | 全部吊销 | 冻结 180 天 |
+
+**handleReactivation() 恢复逻辑：**
+
+```php
+// 商户从 suspended 恢复 → active
+public function handleReactivation(Merchant $merchant): void
+{
+    // maintenance 状态的站点 → active
+    $merchant->stores()
+        ->where('status', 'maintenance')
+        ->update(['status' => 'active']);
+
+    // 注意：已吊销(revoked)的 API 密钥不自动恢复
+    // 商户需重新申请新密钥
+}
+```
+
+---
+
+### 8. 跨租户聚合查询
+
+**DashboardController — 数据聚合：**
+
+使用 `Store::run()` 在每个可访问站点的 Tenant 上下文中执行查询，将结果聚合后返回：
+
+```php
+$result = [];
+foreach ($merchant->stores as $store) {
+    $store->run(function () use (&$result, $store) {
+        $result[$store->id] = [
+            'orders_count'   => Order::count(),
+            'revenue_today'  => Order::whereDate('created_at', today())->sum('total'),
+            // ...
+        ];
+    });
+}
+```
+
+**OrderController — 跨站点查询：**
+
+| 场景 | 参数 | 行为 |
+|------|------|------|
+| 单站点查询 | `store_id=N` | 切换到指定站点 Tenant 上下文查询 |
+| 跨站点聚合 | 无 `store_id` | 遍历商户所有站点，合并分页结果 |
+
+分页响应字段统一使用 `list`（非 `data`）：
+
+```json
+{
+  "list": [...],
+  "total": 100,
+  "page": 1,
+  "per_page": 20
+}
+```
+
+**单站点异常降级：** 单个站点查询失败时记录错误日志，跳过该站点继续聚合其他站点数据，不中断整体响应。
+
+---
+
+### 9. 商户子账号管理
+
+**MerchantUserService 方法清单：**
+
+| 方法 | 说明 |
+|------|------|
+| `createUser(Merchant $merchant, array $data)` | 创建子账号 |
+| `updateUser(MerchantUser $user, array $data)` | 更新子账号信息 |
+| `deleteUser(MerchantUser $user)` | 删除子账号 |
+| `listUsers(Merchant $merchant, array $filters)` | 子账号列表 |
+| `assignRole(MerchantUser $user, string $role)` | 分配角色 |
+| `revokeRole(MerchantUser $user, string $role)` | 撤销角色 |
+| `getPermissions(MerchantUser $user)` | 获取用户权限列表 |
+| `syncPermissions(MerchantUser $user, array $permissions)` | 同步权限 |
+
+**UserController 端点（共 8 个）：**
+
+| # | Method | URI | 说明 |
+|---|--------|-----|------|
+| 1 | GET | `/merchant/users` | 子账号列表 |
+| 2 | POST | `/merchant/users` | 创建子账号 |
+| 3 | GET | `/merchant/users/{user}` | 子账号详情 |
+| 4 | PUT | `/merchant/users/{user}` | 更新子账号 |
+| 5 | DELETE | `/merchant/users/{user}` | 删除子账号 |
+| 6 | POST | `/merchant/users/{user}/roles` | 分配角色 |
+| 7 | DELETE | `/merchant/users/{user}/roles/{role}` | 撤销角色 |
+| 8 | PUT | `/merchant/users/{user}/permissions` | 同步权限 |
+
+---
+
+## 附录（Phase M2）：关键文件索引
+
+| 文件 | 说明 |
+|------|------|
+| `config/auth.php` | merchant guard + merchant_users provider 配置 |
+| `app/Http/Controllers/Merchant/Auth/RegisterController.php` | 商户公开注册 |
+| `app/Http/Controllers/Merchant/Auth/AuthController.php` | login / logout / me / refresh |
+| `app/Http/Requests/Merchant/Auth/LoginRequest.php` | 登录请求验证 |
+| `app/Services/MerchantService.php` | 商户 CRUD / 状态 / 审核 |
+| `app/Services/MerchantDatabaseService.php` | 商户专属库自动创建 |
+| `app/Services/StoreService.php` | 站点 CRUD + 配置管理（封装 StoreProvisioningService） |
+| `app/Services/MerchantKeyService.php` | RSA-4096 密钥对生成与轮换 |
+| `app/Services/MerchantStatusCascadeService.php` | 状态级联（suspended/banned） |
+| `app/Services/MerchantUserService.php` | 子账号 CRUD + 角色权限 |
+| `app/Http/Controllers/Admin/StoreController.php` | Admin 站点管理（14 个接口） |
+| `app/Http/Controllers/Merchant/UserController.php` | 子账号管理（8 个端点） |
+| `app/Http/Controllers/Merchant/DashboardController.php` | 跨租户数据聚合 |
+| `app/Http/Controllers/Merchant/OrderController.php` | 单/跨站点订单查询 |
+| `app/Http/Middleware/MerchantStoreAccess.php` | 商户站点三级权限隔离中间件 |
+| `app/Models/Central/MerchantAuditLog.php` | 商户审核日志 |
+

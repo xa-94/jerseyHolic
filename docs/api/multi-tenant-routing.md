@@ -1,6 +1,7 @@
 # JerseyHolic 多租户 API 路由架构文档
 
-> Phase M1 基础架构阶段产出。本文档描述多租户路由体系、已实现端点清单及后续阶段预留端点。
+> Phase M1 基础架构阶段产出，Phase M2 更新补充商户管理相关端点。本文档描述多租户路由体系、已实现端点清单及后续阶段预留端点。  
+> 商户 API 详细说明（请求/响应格式）请参阅 [merchant-api.md](./merchant-api.md)。
 
 ---
 
@@ -48,7 +49,8 @@
 | Provider | Model | 用途 | Guard |
 |----------|-------|------|-------|
 | `admins` | `App\Models\Admin` | 平台管理员 | `auth:sanctum` |
-| `merchants` | `App\Models\Merchant` | 商户 | `auth:sanctum` |
+| `merchants` | `App\Models\Merchant` | 商户（注册审核元信息） | `auth:sanctum` |
+| `merchant_users` | `App\Models\Central\MerchantUser` | 商户子账号（后台登录） | `auth:merchant` |
 | `customers` | `App\Models\Customer` | 买家 | `auth:sanctum` |
 
 > 当前 Sanctum guard 配置为单一 `sanctum` driver（provider=null），通过 Token 自身关联的 tokenable model 自动判别用户类型。
@@ -125,6 +127,38 @@
 | POST | `/api/v1/admin/orders/{id}/refund` | `AdminOrderController@refund` | 退款 |
 | POST | `/api/v1/admin/orders/{id}/history` | `AdminOrderController@addHistory` | 添加操作记录 |
 
+**商户管理**（Phase M2 新增）
+
+| 方法 | 路径 | Controller | 说明 |
+|------|------|-----------|------|
+| GET | `/api/v1/admin/merchants` | `AdminMerchantController@index` | 商户列表 |
+| POST | `/api/v1/admin/merchants` | `AdminMerchantController@store` | 创建商户 |
+| GET | `/api/v1/admin/merchants/{id}` | `AdminMerchantController@show` | 商户详情 |
+| PUT | `/api/v1/admin/merchants/{id}` | `AdminMerchantController@update` | 更新商户 |
+| DELETE | `/api/v1/admin/merchants/{id}` | `AdminMerchantController@destroy` | 删除商户 |
+| PATCH | `/api/v1/admin/merchants/{id}/status` | `AdminMerchantController@changeStatus` | 修改商户状态 |
+| PATCH | `/api/v1/admin/merchants/{id}/level` | `AdminMerchantController@updateLevel` | 更新商户等级 |
+| POST | `/api/v1/admin/merchants/{id}/review` | `AdminMerchantController@review` | 商户审核（通过/拒绝/补充信息） |
+
+**站点管理**（Phase M2 新增）
+
+| 方法 | 路径 | Controller | 说明 |
+|------|------|-----------|------|
+| GET | `/api/v1/admin/stores` | `AdminStoreController@index` | 站点列表 |
+| POST | `/api/v1/admin/stores` | `AdminStoreController@store` | 创建站点 |
+| GET | `/api/v1/admin/stores/{id}` | `AdminStoreController@show` | 站点详情 |
+| PUT | `/api/v1/admin/stores/{id}` | `AdminStoreController@update` | 更新站点 |
+| DELETE | `/api/v1/admin/stores/{id}` | `AdminStoreController@destroy` | 删除站点 |
+| PATCH | `/api/v1/admin/stores/{id}/status` | `AdminStoreController@updateStatus` | 修改站点状态 |
+| PATCH | `/api/v1/admin/stores/{id}/categories` | `AdminStoreController@updateCategories` | 更新分类配置 |
+| PATCH | `/api/v1/admin/stores/{id}/markets` | `AdminStoreController@updateMarkets` | 更新市场配置 |
+| PATCH | `/api/v1/admin/stores/{id}/languages` | `AdminStoreController@updateLanguages` | 更新语言配置 |
+| PATCH | `/api/v1/admin/stores/{id}/currencies` | `AdminStoreController@updateCurrencies` | 更新货币配置 |
+| PATCH | `/api/v1/admin/stores/{id}/payment-accounts` | `AdminStoreController@updatePaymentAccounts` | 更新支付账户 |
+| PATCH | `/api/v1/admin/stores/{id}/logistics` | `AdminStoreController@updateLogistics` | 更新物流配置 |
+| POST | `/api/v1/admin/stores/{id}/domains` | `AdminStoreController@addDomain` | 添加域名 |
+| DELETE | `/api/v1/admin/stores/{id}/domains/{domainId}` | `AdminStoreController@removeDomain` | 移除域名 |
+
 **RBAC 权限管理**
 
 > 额外中间件：`check.permission:rbac.manage`
@@ -140,31 +174,63 @@
 | POST | `/api/v1/admin/rbac/admins/{id}/roles` | `RbacController@assignRoles` | 分配角色 |
 | GET | `/api/v1/admin/rbac/admins/{id}/permissions` | `RbacController@adminPermissions` | 管理员权限 |
 
-### 3.3 Central 路由 — TODO 占位（M2-M6 实现）
+### 3.3 Central 路由 — M3-M6 实现
 
 | 路由前缀 | 预期 Controller | 计划阶段 | 说明 |
 |----------|----------------|---------|------|
 | `/api/v1/admin/payment-accounts` | PaymentAccountController | M3 | 支付账户管理 |
-| `/api/v1/admin/product-mappings` | ProductMappingController | M2 | 商品映射（P0 安全） |
-| `/api/v1/admin/customers` | CustomerController | M2 | 客户管理 |
+| `/api/v1/admin/product-mappings` | ProductMappingController | M3 | 商品映射（P0 安全） |
+| `/api/v1/admin/customers` | CustomerController | M3 | 客户管理 |
 | `/api/v1/admin/shipments` | ShipmentController | M4 | 物流管理 |
-| `/api/v1/admin/merchants` | MerchantController | M2 | 商户列表、审核、封禁 |
-| `/api/v1/admin/stores` | StoreController | M2 | 站点列表、创建、配置 |
 | `/api/v1/admin/settlements` | SettlementController | M5 | 结算管理 |
 | `/api/v1/admin/risk` | RiskController | M6 | 风控管理 |
 | `/api/v1/admin/settings` | SettingController | M3 | 系统设置 |
 | `/api/v1/admin/fb-pixels` | FbPixelController | M4 | Facebook Pixel |
 | `/api/v1/admin/logs` | OperationLogController | M3 | 操作日志 |
 
-### 3.4 Merchant 路由组 — TODO 占位
+### 3.4 Merchant 路由组 — Phase M2 已实现
 
-> 前缀：`/api/v1/merchant`，中间件：`auth:sanctum`, `force.json`, `central.only`
+**公开端点（无需认证）**
+
+| 方法 | 路径 | Controller | 说明 |
+|------|------|-----------|------|
+| POST | `/api/v1/merchant/register` | `MerchantRegisterController@register` | 商户公开注册 |
+| POST | `/api/v1/merchant/auth/login` | `MerchantAuthController@login` | 商户登录 |
+
+**受保护端点**
+
+> 中间件：`auth:merchant`, `force.json`, `central.only`
+
+| 方法 | 路径 | Controller | 说明 |
+|------|------|-----------|------|
+| POST | `/api/v1/merchant/auth/logout` | `MerchantAuthController@logout` | 退出登录 |
+| GET | `/api/v1/merchant/auth/me` | `MerchantAuthController@me` | 当前用户信息 |
+| POST | `/api/v1/merchant/auth/refresh` | `MerchantAuthController@refresh` | 刷新 Token |
+| GET | `/api/v1/merchant/dashboard` | `MerchantDashboardController@index` | 商户仪表盘 |
+| GET | `/api/v1/merchant/stores` | `MerchantDashboardController@stores` | 商户名下站点列表 |
+| GET | `/api/v1/merchant/users` | `MerchantUserController@index` | 子账号列表 |
+| POST | `/api/v1/merchant/users` | `MerchantUserController@store` | 创建子账号 |
+| GET | `/api/v1/merchant/users/{id}` | `MerchantUserController@show` | 子账号详情 |
+| PUT | `/api/v1/merchant/users/{id}` | `MerchantUserController@update` | 更新子账号 |
+| DELETE | `/api/v1/merchant/users/{id}` | `MerchantUserController@destroy` | 删除子账号 |
+| PATCH | `/api/v1/merchant/users/{id}/password` | `MerchantUserController@changePassword` | 修改密码 |
+| PATCH | `/api/v1/merchant/users/{id}/permissions` | `MerchantUserController@updatePermissions` | 更新权限 |
+| POST | `/api/v1/merchant/users/{id}/unlock` | `MerchantUserController@unlock` | 解除账号锁定 |
+| GET | `/api/v1/merchant/orders` | `MerchantOrderController@index` | 订单列表（只读） |
+| GET | `/api/v1/merchant/orders/{id}` | `MerchantOrderController@show` | 订单详情（只读） |
+| GET | `/api/v1/merchant/api-keys` | `ApiKeyController@index` | API 密钥列表 |
+| POST | `/api/v1/merchant/api-keys` | `ApiKeyController@store` | 生成新密钥对 |
+| POST | `/api/v1/merchant/api-keys/download` | `ApiKeyController@download` | 下载私钥（一次性） |
+| GET | `/api/v1/merchant/api-keys/{keyId}` | `ApiKeyController@show` | 密钥详情 |
+| POST | `/api/v1/merchant/api-keys/{keyId}/rotate` | `ApiKeyController@rotate` | 轮换密钥 |
+| DELETE | `/api/v1/merchant/api-keys/{keyId}` | `ApiKeyController@revoke` | 吊销密钥 |
+
+**待实现（M3+）**
 
 | 路由前缀 | 预期 Controller | 说明 |
 |----------|----------------|------|
 | `/api/v1/merchant/shop` | MerchantShopController | 店铺管理 |
 | `/api/v1/merchant/products` | MerchantProductController | 商品管理 |
-| `/api/v1/merchant/orders` | MerchantOrderController | 订单查看（只读） |
 | `/api/v1/merchant/settlements` | MerchantSettlementController | 结算查看 |
 
 ### 3.5 Webhook 路由 — TODO 占位
@@ -323,16 +389,27 @@ api/routes/
 
 ---
 
-## 7. M1 阶段评估结论
+## 7. 各阶段路由实现进度
 
-Phase M1 在路由层的主要工作：
+### Phase M1 已完成
 
-1. **已完成**：搭建 `central.php` / `tenant.php` 双路由文件架构
-2. **已完成**：`TenancyServiceProvider` 实现域名级路由分发
-3. **已完成**：`tenant` 中间件组（域名识别→租户初始化→防越权访问）
-4. **已完成**：将现有 Admin/Buyer 端点迁移至多租户路由结构
-5. **待实现**：商户管理、站点管理、结算、风控等多租户专属 API（M2-M6）
-6. **待实现**：Webhook 回调处理逻辑
-7. **待实现**：Merchant 后台全部端点
+1. 搞建 `central.php` / `tenant.php` 双路由文件架构
+2. `TenancyServiceProvider` 实现域名级路由分发
+3. `tenant` 中间件组（域名识别→租户初始化→防越权访问）
+4. 将现有 Admin/Buyer 端点迁移至多租户路由结构
+5. Central DB 双库隔离架构、Redis/Cache/Queue/Filesystem Bootstrapper 配置
 
-> 下一阶段（M2）将优先实现 MerchantController、StoreController、CustomerController 等多租户核心管理 API。
+### Phase M2 已完成
+
+1. Admin 商户管理 API（merchants 端点全套）— CRUD + 审核 + 状态/等级变更
+2. Admin 站点管理 API（stores 端点全套）— CRUD + 域名/分类/语言/货币/支付账户配置
+3. Merchant 公开注册 + 登录端点
+4. Merchant 受保护 API：仪表盘、站点列表、子账号管理、订单查看、RSA 密钥管理
+5. Sanctum 三套认证体系（sanctum / merchant / customers）完整配置
+
+### M3+ 待实现
+
+1. Webhook 回调处理逻辑
+2. 支付账户、商品映射、客户管理、物流管理（M3-M4）
+3. 商户店铺管理、商品管理、结算查看 API（M3+）
+4. 结算管理、风控管理（M5-M6）

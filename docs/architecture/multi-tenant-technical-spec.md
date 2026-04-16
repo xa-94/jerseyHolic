@@ -1,8 +1,8 @@
 # JerseyHolic 多租户技术规范
 
-> **版本**: v1.0  
+> **版本**: v2.0  
 > **日期**: 2026-04-17  
-> **阶段**: Phase M1  
+> **阶段**: Phase M1 + Phase M2  
 > **包**: stancl/tenancy v3  
 > **框架**: Laravel 10  
 
@@ -14,6 +14,14 @@
 2. [Redis / Cache / Queue 租户隔离](#2-redis--cache--queue-租户隔离)
 3. [路由层 Central / Tenant 分组配置](#3-路由层-central--tenant-分组配置)
 4. [Nginx 配置与 SSL 管理](#4-nginx-配置与-ssl-管理)
+5. [Phase M2：商户体系核心服务实现](#5-phase-m2商户体系核心服务实现)
+   - 5.1 Sanctum 三套认证体系配置
+   - 5.2 MerchantService 状态管理
+   - 5.3 MerchantKeyService — RSA 密钥管理
+   - 5.4 MerchantStatusCascadeService — 级联逻辑
+   - 5.5 MerchantDatabaseService — 商户库创建
+   - 5.6 MerchantStoreAccess 中间件
+   - 5.7 MerchantUserService — 子账号管理
 
 ---
 
@@ -686,6 +694,462 @@ Job dispatch → 更新 Domain.certificate_status = 'provisioning'
 
 ---
 
+---
+
+## 5. Phase M2：商户体系核心服务实现
+
+### 5.1 Sanctum 三套认证体系配置
+
+**文件**: `api/config/auth.php`
+
+系统通过 Sanctum 同时维护三套独立的认证 Guard，各自绑定不同的 Eloquent Provider 和 Model：
+
+```php
+'guards' => [
+    'web'      => ['driver' => 'session',  'provider' => 'customers'],       // 买家（Tenant DB）
+    'sanctum'  => ['driver' => 'sanctum',  'provider' => null],               // 默认 Sanctum guard
+    'merchant' => ['driver' => 'sanctum',  'provider' => 'merchant_users'],   // 商户子账号（Central DB）
+],
+
+'providers' => [
+    'admins'          => ['driver' => 'eloquent', 'model' => App\Models\Admin::class],
+    'merchants'       => ['driver' => 'eloquent', 'model' => App\Models\Merchant::class],
+    'merchant_users'  => ['driver' => 'eloquent', 'model' => App\Models\Central\MerchantUser::class],
+    'customers'       => ['driver' => 'eloquent', 'model' => App\Models\Customer::class],
+],
+```
+
+**三套 Guard 对应关系**：
+
+| Guard | 驱动 | Provider | Model | 数据库 | 使用场景 |
+|-------|------|----------|-------|--------|----------|
+| `web` | session | customers | `Customer` | Tenant DB | 买家前台 session 认证 |
+| `sanctum`（默认） | sanctum | null | — | — | 管理员（`auth:sanctum` 路由，Admin 路由） |
+| `merchant` | sanctum | merchant_users | `MerchantUser` | Central DB | 商户后台 API Token 认证 |
+
+**路由中间件使用示例**：
+
+```php
+// 管理员路由
+Route::middleware(['auth:sanctum'])->group(...);   // sanctum guard (Admin)
+
+// 商户路由
+Route::middleware(['auth:merchant'])->group(...);  // merchant guard (MerchantUser)
+
+// 买家路由
+Route::middleware(['auth:sanctum,web'])->group(...);
+```
+
+**密码重置配置**：
+
+```php
+'passwords' => [
+    'customers'      => ['provider' => 'customers',      'table' => 'jh_password_reset_tokens', 'expire' => 60],
+    'merchant_users' => ['provider' => 'merchant_users', 'table' => 'password_reset_tokens',    'expire' => 60],
+],
+```
+
+---
+
+### 5.2 MerchantService 状态管理
+
+**文件**: `api/app/Services/MerchantService.php`
+
+#### 5.2.1 状态整型定义
+
+| 整型值 | 字符串标识 | 含义 |
+|--------|-----------|------|
+| 0 | `pending` | 待审核（新注册默认状态）|
+| 1 | `active` | 已激活（审核通过）|
+| 2 | `rejected` | 已拒绝 |
+| 3 | `info_required` | 需补充信息 |
+| 4 | `suspended` | 已暂停 |
+| 5 | `banned` | 已封禁 |
+
+#### 5.2.2 字符串 ↔ 整型映射常量
+
+```php
+/** 状态字符串 → 整型 */
+public const STATUS_MAP = [
+    'pending'       => 0,
+    'active'        => 1,
+    'rejected'      => 2,
+    'info_required' => 3,
+    'suspended'     => 4,
+    'banned'        => 5,
+];
+
+/** 整型 → 状态字符串 */
+public const STATUS_LABEL = [
+    0 => 'pending',
+    1 => 'active',
+    2 => 'rejected',
+    3 => 'info_required',
+    4 => 'suspended',
+    5 => 'banned',
+];
+```
+
+#### 5.2.3 等级与站点上限常量
+
+```php
+/** 各等级站点上限（-1 表示无限制）*/
+public const LEVEL_STORE_LIMITS = [
+    'starter'  => 2,
+    'standard' => 5,
+    'advanced' => 10,
+    'vip'      => -1,
+];
+```
+
+#### 5.2.4 状态变更路径（允许的跃迁）
+
+```php
+private const ALLOWED_TRANSITIONS = [
+    'active'        => ['pending', 'info_required', 'suspended'],
+    'rejected'      => ['pending', 'info_required'],
+    'info_required' => ['pending'],
+    'suspended'     => ['active'],
+    'banned'        => ['active', 'suspended'],
+    'pending'       => [],   // 不允许回退到 pending
+];
+```
+
+**审核流程**（`review()` 方法）：
+
+```
+approve      → status = active   → 写 approved_at → 记录 MerchantAuditLog → 事务外创建商户专属数据库
+reject       → status = rejected → 记录 MerchantAuditLog（含拒绝原因）
+request_info → status = info_required → 记录 MerchantAuditLog（含补充要求）
+```
+
+> DDL（CREATE DATABASE）不支持事务回滚，因此商户库创建步骤在事务提交后独立执行，失败时记录错误日志但不回滚状态变更。
+
+---
+
+### 5.3 MerchantKeyService — RSA 密钥管理
+
+**文件**: `api/app/Services/MerchantKeyService.php`
+
+#### 5.3.1 密钥生成参数
+
+```php
+$config = [
+    'private_key_bits' => 4096,
+    'private_key_type' => OPENSSL_KEYTYPE_RSA,
+];
+```
+
+- 算法：RSA-4096，签名算法 `RSA-SHA256`
+- 公钥：PEM 格式，存入 `merchant_api_keys.public_key`
+- 私钥：**永不持久化到数据库**，生成后立即加密，仅在内存中短暂存在
+
+#### 5.3.2 AES-256-GCM 私钥加密存储
+
+私钥在写入 Cache 前经过 AES-256-GCM 加密，载荷为 Base64 编码的 JSON：
+
+```json
+{
+  "iv":         "<base64, 12 字节随机>",
+  "tag":        "<base64, 16 字节 GCM 认证标签>",
+  "ciphertext": "<base64, 加密后的 PKCS#1 PEM>"
+}
+```
+
+**加密密钥获取**：优先读取 `MERCHANT_KEY_ENCRYPTION_KEY` 环境变量，回退到 `config('app.key')`。Laravel app.key（`base64:xxx` 格式）会先 base64 解码，再通过 SHA-256 取前 32 字节确保密钥长度为 AES-256 所需。
+
+#### 5.3.3 download_token 机制
+
+```
+生成密钥对
+  → 生成 key_id = 'mk_' + random(24)
+  → 生成 download_token = hash('sha256', random(64))
+  → 持久化 MerchantApiKey（公钥 + download_token + download_token_expires_at = now+24h）
+  → 加密私钥载荷写入 Cache，key = 'merchant_private_key:{token}'，TTL = 25h
+  → 响应返回 {key_id, download_token, download_url, expires_in=86400}
+
+下载私钥（validateDownload）
+  → 查 MerchantApiKey.download_token == token
+  → 校验 downloaded_at == null（一次性）
+  → 校验 download_token_expires_at 未过期
+  → 从 Cache 取加密载荷
+  → 更新 downloaded_at = now()，清除 download_token
+  → 清除 Cache
+  → 返回加密载荷（客户端自行解密）
+```
+
+#### 5.3.4 密钥轮换 Grace Period
+
+```php
+// 旧密钥进入 rotating 状态，24h 后自动过期
+$oldKey->update([
+    'status'     => 'rotating',
+    'expires_at' => now()->addHours(24),
+]);
+
+// 同时生成新密钥对
+$this->generateKeyPair($merchant, $store);
+```
+
+**密钥状态流转**：`active` → `rotating`（轮换，Grace Period 24h）→ `expired`（由 Scheduler 定期清理），`active` → `revoked`（手动吊销，含原因）。
+
+**清理过期 rotating 密钥**：
+
+```php
+MerchantApiKey::where('status', 'rotating')
+    ->where('expires_at', '<', now())
+    ->update(['status' => 'expired']);
+```
+
+由 Scheduler 或 Artisan 命令定期调用 `cleanupExpiredKeys()`。
+
+---
+
+### 5.4 MerchantStatusCascadeService — 级联逻辑
+
+**文件**: `api/app/Services/MerchantStatusCascadeService.php`
+
+#### 5.4.1 级联入口（事务包裹）
+
+```php
+public function cascadeStatus(Merchant $merchant, string $newStatus): void
+{
+    DB::connection('central')->transaction(function () use ($merchant, $newStatus) {
+        match ($newStatus) {
+            'suspended' => $this->handleSuspend($merchant),
+            'banned'    => $this->handleBan($merchant),
+            'active'    => $this->handleReactivation($merchant),
+            default     => null,   // pending/rejected/info_required 无级联
+        };
+    });
+}
+```
+
+所有级联操作在同一 Central DB 事务中执行，保证原子性。
+
+#### 5.4.2 handleSuspend — 商户暂停
+
+**触发条件**：`active → suspended`
+
+```
+查询 merchant.stores WHERE status = 1 (active)
+  → 为空 → 无操作
+  → 非空 → 批量 UPDATE status = 2 (maintenance)
+  → 记录 Log::info 含 affected_count 和 store_ids
+```
+
+**Store.status 约定**：
+
+| 整型 | 含义 |
+|------|------|
+| 0 | inactive |
+| 1 | active |
+| 2 | maintenance（商户暂停导致）|
+
+#### 5.4.3 handleBan — 商户封禁
+
+**触发条件**：`active/suspended → banned`
+
+```
+1. 查询 merchant.stores WHERE status IN (1, 2)  (active 或 maintenance)
+   → 批量 UPDATE status = 0 (inactive)
+
+2. handleBanEffects（附加处理）：
+   a. merchant.fund_frozen_until = now() + 180 天
+   b. MerchantApiKey WHERE merchant_id AND status = 'active'
+      → UPDATE status = 'revoked', revoked_at = now(), revoke_reason = 'Merchant banned'
+
+3. 记录 Log::warning 含 deactivated_stores 列表和 fund_frozen_until
+```
+
+#### 5.4.4 handleReactivation — 商户恢复激活
+
+**触发条件**：`suspended → active`
+
+```
+查询 merchant.stores WHERE status = 2 (maintenance)
+  → 为空 → 无操作
+  → 非空 → 批量 UPDATE status = 1 (active)
+  → 记录 Log::info 含 restored_count 和 store_ids
+```
+
+> 注意：仅恢复因暂停而处于 `maintenance(2)` 状态的站点，`inactive(0)` 站点不受影响。已吊销的 API 密钥不自动恢复，需管理员手动操作。
+
+---
+
+### 5.5 MerchantDatabaseService — 商户库创建
+
+**文件**: `api/app/Services/MerchantDatabaseService.php`
+
+#### 5.5.1 数据库命名
+
+```
+jerseyholic_merchant_{merchant_id}
+```
+
+常量 `DB_PREFIX = 'jerseyholic_merchant_'`，方法 `getDatabaseName(Merchant)` 统一生成。
+
+#### 5.5.2 CREATE DATABASE SQL
+
+```sql
+CREATE DATABASE IF NOT EXISTS `jerseyholic_merchant_{id}`
+  CHARACTER SET utf8mb4
+  COLLATE utf8mb4_unicode_ci;
+```
+
+在 `central` 连接对应的 MySQL 实例上通过 `DB::statement()` 执行，不依赖 ORM。
+
+#### 5.5.3 三张初始表结构
+
+**① master_products（商户主商品库）**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | BIGINT UNSIGNED PK | 自增主键 |
+| sku | VARCHAR(100) UNIQUE | SKU 编码 |
+| name | VARCHAR(255) | 商品名称 |
+| description | LONGTEXT | 商品描述 |
+| brand | VARCHAR(100) | 品牌 |
+| safe_name | VARCHAR(255) | 审核通过的安全名称 |
+| safe_description | LONGTEXT | 审核通过的安全描述 |
+| images | JSON | 原始图片 URL 列表 |
+| safe_images | JSON | 审核通过的图片 URL 列表 |
+| price | DECIMAL(10,2) DEFAULT 0.00 | 售价 |
+| cost | DECIMAL(10,2) | 成本价 |
+| status | TINYINT DEFAULT 0 | 0=draft, 1=active, 2=inactive |
+| created_at / updated_at | TIMESTAMP | 时间戳 |
+
+**② master_product_translations（商品多语言翻译）**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | BIGINT UNSIGNED PK | 自增主键 |
+| product_id | BIGINT UNSIGNED | 关联 master_products.id |
+| locale | VARCHAR(10) | 语言代码（en / zh / es 等）|
+| name | VARCHAR(255) | 翻译后商品名称 |
+| description | LONGTEXT | 翻译后商品描述 |
+| created_at / updated_at | TIMESTAMP | 时间戳 |
+
+唯一键：`(product_id, locale)`
+
+**③ sync_rules（商品同步规则）**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| id | BIGINT UNSIGNED PK | 自增主键 |
+| name | VARCHAR(100) | 规则名称 |
+| source_type | VARCHAR(50) | 数据来源类型 |
+| target_store_ids | JSON | 目标店铺 ID 列表 |
+| sync_fields | JSON | 需同步的字段列表 |
+| auto_sync | TINYINT(1) DEFAULT 0 | 是否自动同步 |
+| status | TINYINT DEFAULT 1 | 0=disabled, 1=enabled |
+| created_at / updated_at | TIMESTAMP | 时间戳 |
+
+#### 5.5.4 幂等保护
+
+`merchantDatabaseExists()` 通过 `information_schema.SCHEMATA` 查询实现幂等检查，`createMerchantDatabase()` 同时使用 `CREATE DATABASE IF NOT EXISTS` 双重保护，重复调用安全。
+
+---
+
+### 5.6 MerchantStoreAccess 中间件
+
+**文件**: `api/app/Http/Middleware/MerchantStoreAccess.php`
+
+#### 5.6.1 三级 store_id 解析策略
+
+```php
+$storeId = $request->route('store_id')          // 优先级 1：路由参数
+    ?? $request->header('X-Store-Id')            // 优先级 2：X-Store-Id Header
+    ?? $request->input('store_id');              // 优先级 3：query/body 参数
+```
+
+#### 5.6.2 无 store_id 放行逻辑
+
+```php
+if (!$storeId) {
+    return $next($request);  // Dashboard 等聚合接口直接放行
+}
+```
+
+#### 5.6.3 验证流程
+
+```
+1. auth:merchant guard 验证（$request->user('merchant')）→ 未认证返回 401
+
+2. store_id 解析（三级策略）
+   → 无 store_id → 放行（聚合接口）
+
+3. Store::find($storeId)
+   → 不存在 → 403
+   → store.merchant_id ≠ user.merchant_id → 403
+
+4. $user->canAccessStore($storeId)
+   → 无权限 → 403 'Store access denied'
+
+5. 注入 request attributes
+   → current_store  = Store 实例
+   → current_merchant = MerchantUser.merchant 关联
+```
+
+#### 5.6.4 上下文注入
+
+验证通过后，将 `Store` 实例和 `Merchant` 实例注入 `$request->attributes`，供后续 Controller 通过 `$request->attributes->get('current_store')` 直接使用，无需重复查询。
+
+---
+
+### 5.7 MerchantUserService — 子账号管理
+
+**文件**: `api/app/Services/MerchantUserService.php`
+
+#### 5.7.1 角色权限模型
+
+系统定义三种角色（`VALID_ROLES`）：
+
+| 角色 | 说明 | 权限约束 |
+|------|------|----------|
+| `owner` | 商户拥有者 | 不可被降级（仅其他 owner 可执行）；不可被删除 |
+| `manager` | 管理员 | 可管理 operator，不可操作 owner |
+| `operator` | 操作员 | 默认角色，功能受限 |
+
+#### 5.7.2 allowed_store_ids 站点访问控制
+
+`MerchantUser.allowed_store_ids` 字段（JSON 类型）控制子账号的站点访问范围：
+
+| 值 | 含义 |
+|----|------|
+| `null` | 可访问该商户名下所有站点 |
+| `[]`（空数组） | 无访问权（禁止访问任何站点）|
+| `[1, 3, 5]` | 仅可访问指定 store_id 列表 |
+
+创建/更新时通过 `assertStoresBelongToMerchant()` 验证 storeIds 全部属于该商户。
+
+#### 5.7.3 唯一性约束
+
+- `email`：在同一商户（`merchant_id`）下唯一，含软删除记录（`withTrashed()`）
+- `username`：在同一商户下唯一，含软删除记录
+- 跨商户不要求唯一，允许不同商户使用相同 email/username
+
+#### 5.7.4 账号安全
+
+- `login_failures` 字段记录连续登录失败次数
+- `locked_until` 字段记录账号锁定解除时间
+- 管理员可通过 `resetLoginFailures()` 手动解锁（同时清零 `login_failures` 和 `locked_until`）
+- 密码使用 `bcrypt`（`Hash::make()`）加密
+
+#### 5.7.3 跨商户操作防护
+
+所有写操作均通过 `assertSameMerchant(target, operator)` 验证被操作用户与操作员属于同一商户，防止越权操作：
+
+```php
+if ($target->merchant_id !== $operator->merchant_id) {
+    throw ValidationException::withMessages([
+        'id' => ['无权操作其他商户的用户。'],
+    ]);
+}
+```
+
+---
+
 ## 附录：文件索引
 
 | 类别 | 文件路径 |
@@ -711,3 +1175,10 @@ Job dispatch → 更新 Domain.certificate_status = 'provisioning'
 | ProvisionSSLCertificateJob | `api/app/Jobs/ProvisionSSLCertificateJob.php` |
 | 店铺 Nginx 模板 | `api/resources/templates/nginx/store.conf.template` |
 | 通配符 Nginx 模板 | `api/resources/templates/nginx/wildcard.conf.template` |
+| 认证配置 | `api/config/auth.php` |
+| MerchantService | `api/app/Services/MerchantService.php` |
+| MerchantKeyService | `api/app/Services/MerchantKeyService.php` |
+| MerchantStatusCascadeService | `api/app/Services/MerchantStatusCascadeService.php` |
+| MerchantDatabaseService | `api/app/Services/MerchantDatabaseService.php` |
+| MerchantUserService | `api/app/Services/MerchantUserService.php` |
+| MerchantStoreAccess 中间件 | `api/app/Http/Middleware/MerchantStoreAccess.php` |
