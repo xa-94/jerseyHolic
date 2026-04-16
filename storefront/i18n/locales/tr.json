@@ -1,0 +1,103 @@
+{
+  "nav": {
+    "home": "Ana Sayfa",
+    "products": "Ürünler",
+    "categories": "Kategoriler",
+    "cart": "Sepet",
+    "account": "Hesap",
+    "login": "Giriş Yap",
+    "register": "Kayıt Ol",
+    "logout": "Çıkış Yap",
+    "search": "Ara",
+    "orders": "Siparişler",
+    "wishlist": "İstek Listesi"
+  },
+  "common": {
+    "loading": "Yükleniyor...",
+    "error": "Bir hata oluştu",
+    "success": "Başarılı",
+    "confirm": "Onayla",
+    "cancel": "İptal",
+    "save": "Kaydet",
+    "delete": "Sil",
+    "edit": "Düzenle",
+    "back": "Geri",
+    "next": "İleri",
+    "previous": "Önceki",
+    "submit": "Gönder",
+    "close": "Kapat",
+    "yes": "Evet",
+    "no": "Hayır",
+    "all": "Tümü",
+    "none": "Hiçbiri",
+    "more": "Daha Fazla",
+    "less": "Daha Az"
+  },
+  "product": {
+    "addToCart": "Sepete Ekle",
+    "buyNow": "Hemen Al",
+    "outOfStock": "Stokta Yok",
+    "inStock": "Stokta",
+    "price": "Fiyat",
+    "quantity": "Adet",
+    "description": "Açıklama",
+    "reviews": "Değerlendirmeler",
+    "relatedProducts": "İlgili Ürünler",
+    "size": "Beden",
+    "color": "Renk",
+    "sku": "Ürün Kodu",
+    "category": "Kategori",
+    "share": "Paylaş",
+    "addToWishlist": "İstek Listesine Ekle"
+  },
+  "cart": {
+    "title": "Sepet",
+    "empty": "Sepetiniz boş",
+    "total": "Toplam",
+    "subtotal": "Ara Toplam",
+    "shipping": "Kargo",
+    "tax": "KDV",
+    "checkout": "Ödemeye Geç",
+    "continueShopping": "Alışverişe Devam Et",
+    "remove": "Kaldır",
+    "update": "Güncelle"
+  },
+  "checkout": {
+    "title": "Ödeme",
+    "shippingAddress": "Teslimat Adresi",
+    "billingAddress": "Fatura Adresi",
+    "paymentMethod": "Ödeme Yöntemi",
+    "orderSummary": "Sipariş Özeti",
+    "placeOrder": "Sipariş Ver",
+    "orderSuccess": "Sipariş başarıyla verildi!"
+  },
+  "footer": {
+    "aboutUs": "Hakkımızda",
+    "contactUs": "Bize Ulaşın",
+    "privacyPolicy": "Gizlilik Politikası",
+    "termsOfService": "Hizmet Şartları",
+    "shippingPolicy": "Kargo Politikası",
+    "returnPolicy": "İade Politikası",
+    "faq": "Sıkça Sorulan Sorular",
+    "copyright": "© 2024 JerseyHolic. Tüm hakları saklıdır."
+  },
+  "auth": {
+    "login": "Giriş Yap",
+    "register": "Kayıt Ol",
+    "email": "E-posta",
+    "password": "Şifre",
+    "confirmPassword": "Şifre Onayı",
+    "firstName": "Ad",
+    "lastName": "Soyad",
+    "forgotPassword": "Şifremi Unuttum?",
+    "resetPassword": "Şifre Sıfırla",
+    "rememberMe": "Beni Hatırla"
+  },
+  "account": {
+    "profile": "Profil",
+    "orders": "Siparişlerim",
+    "addresses": "Adresler",
+    "changePassword": "Şifre Değiştir",
+    "orderHistory": "Sipariş Geçmişi"
+  }
+}

@@ -1,0 +1,103 @@
+{
+  "nav": {
+    "home": "Hjem",
+    "products": "Produkter",
+    "categories": "Kategorier",
+    "cart": "Indkøbskurv",
+    "account": "Konto",
+    "login": "Log ind",
+    "register": "Registrer",
+    "logout": "Log ud",
+    "search": "Søg",
+    "orders": "Ordrer",
+    "wishlist": "Ønskeliste"
+  },
+  "common": {
+    "loading": "Indlæser...",
+    "error": "Der opstod en fejl",
+    "success": "Succes",
+    "confirm": "Bekræft",
+    "cancel": "Annuller",
+    "save": "Gem",
+    "delete": "Slet",
+    "edit": "Rediger",
+    "back": "Tilbage",
+    "next": "Næste",
+    "previous": "Forrige",
+    "submit": "Indsend",
+    "close": "Luk",
+    "yes": "Ja",
+    "no": "Nej",
+    "all": "Alle",
+    "none": "Ingen",
+    "more": "Mere",
+    "less": "Mindre"
+  },
+  "product": {
+    "addToCart": "Læg i kurv",
+    "buyNow": "Køb nu",
+    "outOfStock": "Ikke på lager",
+    "inStock": "På lager",
+    "price": "Pris",
+    "quantity": "Antal",
+    "description": "Beskrivelse",
+    "reviews": "Anmeldelser",
+    "relatedProducts": "Relaterede produkter",
+    "size": "Størrelse",
+    "color": "Farve",
+    "sku": "Varenummer",
+    "category": "Kategori",
+    "share": "Del",
+    "addToWishlist": "Tilføj til ønskeliste"
+  },
+  "cart": {
+    "title": "Indkøbskurv",
+    "empty": "Din indkøbskurv er tom",
+    "total": "Total",
+    "subtotal": "Subtotal",
+    "shipping": "Forsendelse",
+    "tax": "Moms",
+    "checkout": "Gå til kassen",
+    "continueShopping": "Fortsæt med at handle",
+    "remove": "Fjern",
+    "update": "Opdater"
+  },
+  "checkout": {
+    "title": "Kasse",
+    "shippingAddress": "Leveringsadresse",
+    "billingAddress": "Faktureringsadresse",
+    "paymentMethod": "Betalingsmetode",
+    "orderSummary": "Ordreoversigt",
+    "placeOrder": "Afgiv ordre",
+    "orderSuccess": "Ordren er afgivet!"
+  },
+  "footer": {
+    "aboutUs": "Om os",
+    "contactUs": "Kontakt os",
+    "privacyPolicy": "Privatlivspolitik",
+    "termsOfService": "Servicevilkår",
+    "shippingPolicy": "Forsendelsespolitik",
+    "returnPolicy": "Returpolitik",
+    "faq": "Ofte stillede spørgsmål",
+    "copyright": "© 2024 JerseyHolic. Alle rettigheder forbeholdes."
+  },
+  "auth": {
+    "login": "Log ind",
+    "register": "Registrer",
+    "email": "E-mailadresse",
+    "password": "Adgangskode",
+    "confirmPassword": "Bekræft adgangskode",
+    "firstName": "Fornavn",
+    "lastName": "Efternavn",
+    "forgotPassword": "Glemt adgangskode?",
+    "resetPassword": "Nulstil adgangskode",
+    "rememberMe": "Husk mig"
+  },
+  "account": {
+    "profile": "Profil",
+    "orders": "Mine ordrer",
+    "addresses": "Adresser",
+    "changePassword": "Skift adgangskode",
+    "orderHistory": "Ordrehistorik"
+  }
+}

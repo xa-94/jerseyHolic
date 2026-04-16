@@ -1,0 +1,103 @@
+{
+  "nav": {
+    "home": "Αρχική",
+    "products": "Προϊόντα",
+    "categories": "Κατηγορίες",
+    "cart": "Καλάθι",
+    "account": "Λογαριασμός",
+    "login": "Σύνδεση",
+    "register": "Εγγραφή",
+    "logout": "Αποσύνδεση",
+    "search": "Αναζήτηση",
+    "orders": "Παραγγελίες",
+    "wishlist": "Λίστα επιθυμιών"
+  },
+  "common": {
+    "loading": "Φόρτωση...",
+    "error": "Παρουσιάστηκε σφάλμα",
+    "success": "Επιτυχία",
+    "confirm": "Επιβεβαίωση",
+    "cancel": "Ακύρωση",
+    "save": "Αποθήκευση",
+    "delete": "Διαγραφή",
+    "edit": "Επεξεργασία",
+    "back": "Πίσω",
+    "next": "Επόμενο",
+    "previous": "Προηγούμενο",
+    "submit": "Υποβολή",
+    "close": "Κλείσιμο",
+    "yes": "Ναι",
+    "no": "Όχι",
+    "all": "Όλα",
+    "none": "Κανένα",
+    "more": "Περισσότερα",
+    "less": "Λιγότερα"
+  },
+  "product": {
+    "addToCart": "Προσθήκη στο καλάθι",
+    "buyNow": "Αγοράστε τώρα",
+    "outOfStock": "Εξαντλημένο",
+    "inStock": "Σε απόθεμα",
+    "price": "Τιμή",
+    "quantity": "Ποσότητα",
+    "description": "Περιγραφή",
+    "reviews": "Κριτικές",
+    "relatedProducts": "Σχετικά προϊόντα",
+    "size": "Μέγεθος",
+    "color": "Χρώμα",
+    "sku": "Κωδικός",
+    "category": "Κατηγορία",
+    "share": "Κοινοποίηση",
+    "addToWishlist": "Προσθήκη στη λίστα επιθυμιών"
+  },
+  "cart": {
+    "title": "Καλάθι αγορών",
+    "empty": "Το καλάθι σας είναι άδειο",
+    "total": "Σύνολο",
+    "subtotal": "Μερικό σύνολο",
+    "shipping": "Αποστολή",
+    "tax": "ΦΠΑ",
+    "checkout": "Ολοκλήρωση αγοράς",
+    "continueShopping": "Συνέχεια αγορών",
+    "remove": "Αφαίρεση",
+    "update": "Ενημέρωση"
+  },
+  "checkout": {
+    "title": "Ολοκλήρωση αγοράς",
+    "shippingAddress": "Διεύθυνση αποστολής",
+    "billingAddress": "Διεύθυνση χρέωσης",
+    "paymentMethod": "Τρόπος πληρωμής",
+    "orderSummary": "Σύνοψη παραγγελίας",
+    "placeOrder": "Υποβολή παραγγελίας",
+    "orderSuccess": "Η παραγγελία υποβλήθηκε επιτυχώς!"
+  },
+  "footer": {
+    "aboutUs": "Σχετικά με εμάς",
+    "contactUs": "Επικοινωνία",
+    "privacyPolicy": "Πολιτική απορρήτου",
+    "termsOfService": "Όροι χρήσης",
+    "shippingPolicy": "Πολιτική αποστολής",
+    "returnPolicy": "Πολιτική επιστροφών",
+    "faq": "Συχνές ερωτήσεις",
+    "copyright": "© 2024 JerseyHolic. Με επιφύλαξη παντός δικαιώματος."
+  },
+  "auth": {
+    "login": "Σύνδεση",
+    "register": "Εγγραφή",
+    "email": "Email",
+    "password": "Κωδικός",
+    "confirmPassword": "Επιβεβαίωση κωδικού",
+    "firstName": "Όνομα",
+    "lastName": "Επώνυμο",
+    "forgotPassword": "Ξεχάσατε τον κωδικό;",
+    "resetPassword": "Επαναφορά κωδικού",
+    "rememberMe": "Να με θυμάσαι"
+  },
+  "account": {
+    "profile": "Προφίλ",
+    "orders": "Οι παραγγελίες μου",
+    "addresses": "Διευθύνσεις",
+    "changePassword": "Αλλαγή κωδικού",
+    "orderHistory": "Ιστορικό παραγγελιών"
+  }
+}

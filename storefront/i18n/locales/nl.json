@@ -1,0 +1,103 @@
+{
+  "nav": {
+    "home": "Home",
+    "products": "Producten",
+    "categories": "Categorieën",
+    "cart": "Winkelwagen",
+    "account": "Account",
+    "login": "Inloggen",
+    "register": "Registreren",
+    "logout": "Uitloggen",
+    "search": "Zoeken",
+    "orders": "Bestellingen",
+    "wishlist": "Verlanglijst"
+  },
+  "common": {
+    "loading": "Laden...",
+    "error": "Er is een fout opgetreden",
+    "success": "Succesvol",
+    "confirm": "Bevestigen",
+    "cancel": "Annuleren",
+    "save": "Opslaan",
+    "delete": "Verwijderen",
+    "edit": "Bewerken",
+    "back": "Terug",
+    "next": "Volgende",
+    "previous": "Vorige",
+    "submit": "Verzenden",
+    "close": "Sluiten",
+    "yes": "Ja",
+    "no": "Nee",
+    "all": "Alle",
+    "none": "Geen",
+    "more": "Meer",
+    "less": "Minder"
+  },
+  "product": {
+    "addToCart": "In winkelwagen",
+    "buyNow": "Nu kopen",
+    "outOfStock": "Niet op voorraad",
+    "inStock": "Op voorraad",
+    "price": "Prijs",
+    "quantity": "Aantal",
+    "description": "Beschrijving",
+    "reviews": "Beoordelingen",
+    "relatedProducts": "Gerelateerde producten",
+    "size": "Maat",
+    "color": "Kleur",
+    "sku": "Artikelnummer",
+    "category": "Categorie",
+    "share": "Delen",
+    "addToWishlist": "Aan verlanglijst toevoegen"
+  },
+  "cart": {
+    "title": "Winkelwagen",
+    "empty": "Uw winkelwagen is leeg",
+    "total": "Totaal",
+    "subtotal": "Subtotaal",
+    "shipping": "Verzending",
+    "tax": "BTW",
+    "checkout": "Afrekenen",
+    "continueShopping": "Verder winkelen",
+    "remove": "Verwijderen",
+    "update": "Bijwerken"
+  },
+  "checkout": {
+    "title": "Afrekenen",
+    "shippingAddress": "Verzendadres",
+    "billingAddress": "Factuuradres",
+    "paymentMethod": "Betaalmethode",
+    "orderSummary": "Besteloverzicht",
+    "placeOrder": "Bestelling plaatsen",
+    "orderSuccess": "Bestelling succesvol geplaatst!"
+  },
+  "footer": {
+    "aboutUs": "Over ons",
+    "contactUs": "Contact",
+    "privacyPolicy": "Privacybeleid",
+    "termsOfService": "Servicevoorwaarden",
+    "shippingPolicy": "Verzendbeleid",
+    "returnPolicy": "Retourbeleid",
+    "faq": "Veelgestelde vragen",
+    "copyright": "© 2024 JerseyHolic. Alle rechten voorbehouden."
+  },
+  "auth": {
+    "login": "Inloggen",
+    "register": "Registreren",
+    "email": "E-mailadres",
+    "password": "Wachtwoord",
+    "confirmPassword": "Wachtwoord bevestigen",
+    "firstName": "Voornaam",
+    "lastName": "Achternaam",
+    "forgotPassword": "Wachtwoord vergeten?",
+    "resetPassword": "Wachtwoord resetten",
+    "rememberMe": "Onthoud mij"
+  },
+  "account": {
+    "profile": "Profiel",
+    "orders": "Mijn bestellingen",
+    "addresses": "Adressen",
+    "changePassword": "Wachtwoord wijzigen",
+    "orderHistory": "Bestelgeschiedenis"
+  }
+}

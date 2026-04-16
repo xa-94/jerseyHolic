@@ -1,0 +1,103 @@
+{
+  "nav": {
+    "home": "Hem",
+    "products": "Produkter",
+    "categories": "Kategorier",
+    "cart": "Varukorg",
+    "account": "Konto",
+    "login": "Logga in",
+    "register": "Registrera",
+    "logout": "Logga ut",
+    "search": "Sök",
+    "orders": "Beställningar",
+    "wishlist": "Önskelista"
+  },
+  "common": {
+    "loading": "Laddar...",
+    "error": "Ett fel har inträffat",
+    "success": "Lyckades",
+    "confirm": "Bekräfta",
+    "cancel": "Avbryt",
+    "save": "Spara",
+    "delete": "Radera",
+    "edit": "Redigera",
+    "back": "Tillbaka",
+    "next": "Nästa",
+    "previous": "Föregående",
+    "submit": "Skicka",
+    "close": "Stäng",
+    "yes": "Ja",
+    "no": "Nej",
+    "all": "Alla",
+    "none": "Inga",
+    "more": "Mer",
+    "less": "Mindre"
+  },
+  "product": {
+    "addToCart": "Lägg i varukorgen",
+    "buyNow": "Köp nu",
+    "outOfStock": "Slut i lager",
+    "inStock": "I lager",
+    "price": "Pris",
+    "quantity": "Antal",
+    "description": "Beskrivning",
+    "reviews": "Recensioner",
+    "relatedProducts": "Relaterade produkter",
+    "size": "Storlek",
+    "color": "Färg",
+    "sku": "Artikelnummer",
+    "category": "Kategori",
+    "share": "Dela",
+    "addToWishlist": "Lägg till i önskelistan"
+  },
+  "cart": {
+    "title": "Varukorg",
+    "empty": "Din varukorg är tom",
+    "total": "Totalt",
+    "subtotal": "Delsumma",
+    "shipping": "Frakt",
+    "tax": "Moms",
+    "checkout": "Till kassan",
+    "continueShopping": "Fortsätt handla",
+    "remove": "Ta bort",
+    "update": "Uppdatera"
+  },
+  "checkout": {
+    "title": "Kassa",
+    "shippingAddress": "Leveransadress",
+    "billingAddress": "Faktureringsadress",
+    "paymentMethod": "Betalningsmetod",
+    "orderSummary": "Ordersammanfattning",
+    "placeOrder": "Lägg beställning",
+    "orderSuccess": "Beställningen har lagts!"
+  },
+  "footer": {
+    "aboutUs": "Om oss",
+    "contactUs": "Kontakta oss",
+    "privacyPolicy": "Integritetspolicy",
+    "termsOfService": "Användarvillkor",
+    "shippingPolicy": "Fraktpolicy",
+    "returnPolicy": "Returpolicy",
+    "faq": "Vanliga frågor",
+    "copyright": "© 2024 JerseyHolic. Alla rättigheter förbehållna."
+  },
+  "auth": {
+    "login": "Logga in",
+    "register": "Registrera",
+    "email": "E-postadress",
+    "password": "Lösenord",
+    "confirmPassword": "Bekräfta lösenord",
+    "firstName": "Förnamn",
+    "lastName": "Efternamn",
+    "forgotPassword": "Glömt lösenordet?",
+    "resetPassword": "Återställ lösenord",
+    "rememberMe": "Kom ihåg mig"
+  },
+  "account": {
+    "profile": "Profil",
+    "orders": "Mina beställningar",
+    "addresses": "Adresser",
+    "changePassword": "Byt lösenord",
+    "orderHistory": "Orderhistorik"
+  }
+}

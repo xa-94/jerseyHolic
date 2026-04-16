@@ -1,0 +1,70 @@
+# JerseyHolic Wildcard Domain Configuration
+# Handles *.jerseyholic.com for development/testing/fallback
+# WARNING: This file is auto-generated. Do not edit manually.
+
+# Default server block — catch-all for unrecognized subdomains
+server {
+    listen 80 default_server;
+    listen [::]:80 default_server;
+    server_name *.jerseyholic.com;
+
+    # Redirect HTTP to HTTPS
+    return 301 https://$host$request_uri;
+}
+
+server {
+    listen 443 ssl http2 default_server;
+    listen [::]:443 ssl http2 default_server;
+    server_name *.jerseyholic.com;
+
+    # Wildcard SSL Certificate (Let's Encrypt / ACMEv2 DNS-01)
+    ssl_certificate {{SSL_WILDCARD_CERT_PATH}};
+    ssl_certificate_key {{SSL_WILDCARD_KEY_PATH}};
+    ssl_protocols TLSv1.2 TLSv1.3;
+    ssl_ciphers ECDHE-ECDSA-AES128-GCM-SHA256:ECDHE-RSA-AES128-GCM-SHA256:ECDHE-ECDSA-AES256-GCM-SHA384:ECDHE-RSA-AES256-GCM-SHA384:ECDHE-ECDSA-CHACHA20-POLY1305:ECDHE-RSA-CHACHA20-POLY1305:DHE-RSA-AES128-GCM-SHA256:DHE-RSA-AES256-GCM-SHA384;
+    ssl_prefer_server_ciphers off;
+    ssl_session_cache shared:WildcardSSL:10m;
+    ssl_session_timeout 1d;
+    ssl_session_tickets off;
+
+    # Root and Index
+    root /var/www/jerseyholic/storefront/public;
+    index index.html;
+
+    # Storefront (Nuxt 3 SSR) — default port for dev/test
+    location / {
+        proxy_pass http://127.0.0.1:{{NUXT_PORT}};
+        proxy_http_version 1.1;
+        proxy_set_header Upgrade $http_upgrade;
+        proxy_set_header Connection 'upgrade';
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+        proxy_cache_bypass $http_upgrade;
+    }
+
+    # API Proxy (Laravel)
+    location /api/ {
+        proxy_pass http://127.0.0.1:{{LARAVEL_PORT}};
+        proxy_set_header Host $host;
+        proxy_set_header X-Real-IP $remote_addr;
+        proxy_set_header X-Forwarded-For $proxy_add_x_forwarded_for;
+        proxy_set_header X-Forwarded-Proto $scheme;
+    }
+
+    # Static assets
+    location ~* \.(js|css|png|jpg|jpeg|gif|ico|svg|woff|woff2|ttf|eot)$ {
+        expires 30d;
+        add_header Cache-Control "public, immutable";
+    }
+
+    # Security headers
+    add_header X-Frame-Options "SAMEORIGIN" always;
+    add_header X-Content-Type-Options "nosniff" always;
+    add_header X-XSS-Protection "1; mode=block" always;
+
+    # Logs
+    access_log /var/log/nginx/wildcard_jerseyholic_access.log;
+    error_log /var/log/nginx/wildcard_jerseyholic_error.log;
+}

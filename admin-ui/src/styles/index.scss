@@ -1,0 +1,25 @@
+// Element Plus theme overrides
+:root {
+  --el-color-primary: #409eff;
+}
+
+// Global resets
+* { margin: 0; padding: 0; box-sizing: border-box; }
+html, body { height: 100%; font-family: 'Helvetica Neue', Helvetica, Arial, sans-serif; }
+#app { height: 100%; }
+
+// Scrollbar
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-thumb { background: #c0c4cc; border-radius: 3px; }
+::-webkit-scrollbar-track { background: transparent; }
+
+// Utility classes
+.text-center { text-align: center; }
+.text-right { text-align: right; }
+.mt-20 { margin-top: 20px; }
+.mb-20 { margin-bottom: 20px; }
+
+// Page container
+.page-container {
+  padding: 0;
+}

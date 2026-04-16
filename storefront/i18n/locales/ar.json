@@ -1,0 +1,103 @@
+{
+  "nav": {
+    "home": "الرئيسية",
+    "products": "المنتجات",
+    "categories": "الفئات",
+    "cart": "سلة التسوق",
+    "account": "الحساب",
+    "login": "تسجيل الدخول",
+    "register": "إنشاء حساب",
+    "logout": "تسجيل الخروج",
+    "search": "بحث",
+    "orders": "الطلبات",
+    "wishlist": "قائمة الأمنيات"
+  },
+  "common": {
+    "loading": "جاري التحميل...",
+    "error": "حدث خطأ",
+    "success": "تم بنجاح",
+    "confirm": "تأكيد",
+    "cancel": "إلغاء",
+    "save": "حفظ",
+    "delete": "حذف",
+    "edit": "تعديل",
+    "back": "رجوع",
+    "next": "التالي",
+    "previous": "السابق",
+    "submit": "إرسال",
+    "close": "إغلاق",
+    "yes": "نعم",
+    "no": "لا",
+    "all": "الكل",
+    "none": "لا شيء",
+    "more": "المزيد",
+    "less": "أقل"
+  },
+  "product": {
+    "addToCart": "أضف إلى السلة",
+    "buyNow": "اشتر الآن",
+    "outOfStock": "غير متوفر",
+    "inStock": "متوفر",
+    "price": "السعر",
+    "quantity": "الكمية",
+    "description": "الوصف",
+    "reviews": "التقييمات",
+    "relatedProducts": "منتجات ذات صلة",
+    "size": "المقاس",
+    "color": "اللون",
+    "sku": "رقم المنتج",
+    "category": "الفئة",
+    "share": "مشاركة",
+    "addToWishlist": "أضف إلى قائمة الأمنيات"
+  },
+  "cart": {
+    "title": "سلة التسوق",
+    "empty": "سلة التسوق فارغة",
+    "total": "المجموع",
+    "subtotal": "المجموع الفرعي",
+    "shipping": "الشحن",
+    "tax": "الضريبة",
+    "checkout": "إتمام الشراء",
+    "continueShopping": "مواصلة التسوق",
+    "remove": "إزالة",
+    "update": "تحديث"
+  },
+  "checkout": {
+    "title": "إتمام الشراء",
+    "shippingAddress": "عنوان الشحن",
+    "billingAddress": "عنوان الفاتورة",
+    "paymentMethod": "طريقة الدفع",
+    "orderSummary": "ملخص الطلب",
+    "placeOrder": "تأكيد الطلب",
+    "orderSuccess": "تم تقديم الطلب بنجاح!"
+  },
+  "footer": {
+    "aboutUs": "من نحن",
+    "contactUs": "اتصل بنا",
+    "privacyPolicy": "سياسة الخصوصية",
+    "termsOfService": "شروط الخدمة",
+    "shippingPolicy": "سياسة الشحن",
+    "returnPolicy": "سياسة الإرجاع",
+    "faq": "الأسئلة الشائعة",
+    "copyright": "© 2024 JerseyHolic. جميع الحقوق محفوظة."
+  },
+  "auth": {
+    "login": "تسجيل الدخول",
+    "register": "إنشاء حساب",
+    "email": "البريد الإلكتروني",
+    "password": "كلمة المرور",
+    "confirmPassword": "تأكيد كلمة المرور",
+    "firstName": "الاسم الأول",
+    "lastName": "اسم العائلة",
+    "forgotPassword": "نسيت كلمة المرور؟",
+    "resetPassword": "إعادة تعيين كلمة المرور",
+    "rememberMe": "تذكرني"
+  },
+  "account": {
+    "profile": "الملف الشخصي",
+    "orders": "طلباتي",
+    "addresses": "العناوين",
+    "changePassword": "تغيير كلمة المرور",
+    "orderHistory": "سجل الطلبات"
+  }
+}

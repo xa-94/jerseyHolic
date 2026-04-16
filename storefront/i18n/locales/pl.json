@@ -1,0 +1,103 @@
+{
+  "nav": {
+    "home": "Strona główna",
+    "products": "Produkty",
+    "categories": "Kategorie",
+    "cart": "Koszyk",
+    "account": "Konto",
+    "login": "Zaloguj się",
+    "register": "Zarejestruj się",
+    "logout": "Wyloguj się",
+    "search": "Szukaj",
+    "orders": "Zamówienia",
+    "wishlist": "Lista życzeń"
+  },
+  "common": {
+    "loading": "Ładowanie...",
+    "error": "Wystąpił błąd",
+    "success": "Sukces",
+    "confirm": "Potwierdź",
+    "cancel": "Anuluj",
+    "save": "Zapisz",
+    "delete": "Usuń",
+    "edit": "Edytuj",
+    "back": "Wstecz",
+    "next": "Dalej",
+    "previous": "Wstecz",
+    "submit": "Wyślij",
+    "close": "Zamknij",
+    "yes": "Tak",
+    "no": "Nie",
+    "all": "Wszystkie",
+    "none": "Brak",
+    "more": "Więcej",
+    "less": "Mniej"
+  },
+  "product": {
+    "addToCart": "Dodaj do koszyka",
+    "buyNow": "Kup teraz",
+    "outOfStock": "Brak w magazynie",
+    "inStock": "Dostępny",
+    "price": "Cena",
+    "quantity": "Ilość",
+    "description": "Opis",
+    "reviews": "Opinie",
+    "relatedProducts": "Powiązane produkty",
+    "size": "Rozmiar",
+    "color": "Kolor",
+    "sku": "Numer katalogowy",
+    "category": "Kategoria",
+    "share": "Udostępnij",
+    "addToWishlist": "Dodaj do listy życzeń"
+  },
+  "cart": {
+    "title": "Koszyk",
+    "empty": "Twój koszyk jest pusty",
+    "total": "Suma",
+    "subtotal": "Suma częściowa",
+    "shipping": "Wysyłka",
+    "tax": "Podatek",
+    "checkout": "Do kasy",
+    "continueShopping": "Kontynuuj zakupy",
+    "remove": "Usuń",
+    "update": "Aktualizuj"
+  },
+  "checkout": {
+    "title": "Kasa",
+    "shippingAddress": "Adres dostawy",
+    "billingAddress": "Adres rozliczeniowy",
+    "paymentMethod": "Metoda płatności",
+    "orderSummary": "Podsumowanie zamówienia",
+    "placeOrder": "Złóż zamówienie",
+    "orderSuccess": "Zamówienie złożone pomyślnie!"
+  },
+  "footer": {
+    "aboutUs": "O nas",
+    "contactUs": "Kontakt",
+    "privacyPolicy": "Polityka prywatności",
+    "termsOfService": "Regulamin",
+    "shippingPolicy": "Polityka wysyłki",
+    "returnPolicy": "Polityka zwrotów",
+    "faq": "Najczęściej zadawane pytania",
+    "copyright": "© 2024 JerseyHolic. Wszelkie prawa zastrzeżone."
+  },
+  "auth": {
+    "login": "Zaloguj się",
+    "register": "Zarejestruj się",
+    "email": "Adres e-mail",
+    "password": "Hasło",
+    "confirmPassword": "Potwierdź hasło",
+    "firstName": "Imię",
+    "lastName": "Nazwisko",
+    "forgotPassword": "Zapomniałeś hasła?",
+    "resetPassword": "Zresetuj hasło",
+    "rememberMe": "Zapamiętaj mnie"
+  },
+  "account": {
+    "profile": "Profil",
+    "orders": "Moje zamówienia",
+    "addresses": "Adresy",
+    "changePassword": "Zmień hasło",
+    "orderHistory": "Historia zamówień"
+  }
+}
