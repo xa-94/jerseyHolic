@@ -16,7 +16,8 @@ return new class extends Migration
 
             $table->id();
             $table->foreignId('merchant_id')->constrained('merchants')->onDelete('cascade');
-            $table->foreignId('store_id')->nullable()->constrained('stores')->onDelete('set null');
+            $table->string('store_id', 36)->nullable();
+                        $table->foreign('store_id')->references('id')->on('stores')->onDelete('set null');
             $table->string('key_id', 32)->unique()->comment('公开的密钥标识符');
             $table->text('public_key')->comment('RSA 公钥(PEM格式)');
             $table->string('algorithm', 20)->default('RSA-SHA256');

@@ -64,6 +64,18 @@ class Store extends Tenant
         return $this->getAttribute($this->getTenantKeyName());
     }
 
+    /**
+     * 真实存在于 stores 表中的列（非 VirtualColumn）
+     */
+    public static function getCustomColumns(): array
+    {
+        return [
+            'id',
+            'merchant_id',
+            'status',
+        ];
+    }
+
     protected $fillable = [
         'merchant_id',
         'store_name',

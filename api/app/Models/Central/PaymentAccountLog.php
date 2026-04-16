@@ -21,7 +21,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class PaymentAccountLog extends CentralModel
 {
-    protected $table = 'jh_payment_account_logs';
+    protected $table = 'payment_account_logs';
 
     protected $fillable = [
         'account_id', 'order_id', 'amount', 'currency', 'original_amount', 'action',

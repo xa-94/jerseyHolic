@@ -20,6 +20,8 @@ use App\Http\Controllers\Api\CategoryController as BuyerCategoryController;
 use App\Http\Controllers\Api\CheckoutController;
 use App\Http\Controllers\Api\ProductController as BuyerProductController;
 use App\Http\Controllers\Api\OrderController as BuyerOrderController;
+use App\Http\Controllers\Api\PaymentController;
+use App\Http\Controllers\Api\StripeWebhookController;
 
 Route::prefix('api/v1')
     ->middleware(['force.json', 'set.locale'])
@@ -97,6 +99,12 @@ Route::prefix('api/v1')
                     Route::delete('/{id}', [AddressController::class, 'destroy']);
                     Route::patch('/{id}/default', [AddressController::class, 'setDefault']);
                 });
+            });
+
+            // Payment（M3-008/009）
+            Route::prefix('payment')->group(function () {
+                Route::post('create', [PaymentController::class, 'create']);
+                Route::post('capture/{orderNo}', [PaymentController::class, 'capture']);
             });
 
             Route::prefix('wishlist')->group(function () {

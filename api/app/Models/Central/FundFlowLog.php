@@ -26,7 +26,7 @@ namespace App\Models\Central;
  */
 class FundFlowLog extends CentralModel
 {
-    protected $table = 'jh_fund_flow_logs';
+    protected $table = 'fund_flow_logs';
 
     protected $fillable = [
         'flow_no',

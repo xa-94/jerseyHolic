@@ -12,8 +12,9 @@ return new class extends Migration
             $table->engine = 'InnoDB';
 
             $table->id();
-            $table->foreignId('settlement_id')->constrained('settlement_records')->onDelete('cascade');
-            $table->foreignId('store_id')->constrained('stores')->onDelete('restrict');
+            $table->foreignId('settlement_id')->constrained('merchant_settlements')->onDelete('cascade');
+            $table->string('store_id', 36);
+                        $table->foreign('store_id')->references('id')->on('stores')->onDelete('restrict');
             $table->integer('order_count')->default(0);
             $table->decimal('revenue', 12, 2)->default(0);
             $table->decimal('refunds', 12, 2)->default(0);

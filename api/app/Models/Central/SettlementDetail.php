@@ -23,7 +23,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class SettlementDetail extends CentralModel
 {
-    protected $table = 'jh_settlement_details';
+    protected $table = 'settlement_details';
 
     protected $fillable = [
         'settlement_id',

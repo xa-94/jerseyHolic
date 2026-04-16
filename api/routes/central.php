@@ -27,6 +27,16 @@ use App\Http\Controllers\Admin\CategoryController as AdminCategoryController;
 use App\Http\Controllers\Admin\OrderController as AdminOrderController;
 use App\Http\Controllers\Admin\MerchantController as AdminMerchantController;
 use App\Http\Controllers\Admin\StoreController as AdminStoreController;
+use App\Http\Controllers\Admin\PaymentAccountGroupController;
+use App\Http\Controllers\Admin\PaymentAccountController;
+use App\Http\Controllers\Admin\PaymentGroupMappingController;
+use App\Http\Controllers\Admin\BlacklistController;
+use App\Http\Controllers\Admin\CommissionRuleController;
+use App\Http\Controllers\Admin\SafeDescriptionController;
+use App\Http\Controllers\Admin\RiskDashboardController;
+use App\Http\Controllers\Admin\NotificationController as AdminNotificationController;
+use App\Http\Controllers\Merchant\SettlementController as MerchantSettlementController;
+use App\Http\Controllers\Merchant\NotificationController as MerchantNotificationController;
 
 // Admin auth (public)
 Route::prefix('api/v1/admin/auth')->middleware(['force.json'])->group(function () {
@@ -88,9 +98,23 @@ Route::prefix('api/v1/admin')
             Route::post('/{id}/history', [AdminOrderController::class, 'addHistory']);
         });
 
-        // Payment Accounts
+        // Payment Account Groups (M3-003)
+        Route::prefix('payment-account-groups')->group(function () {
+            Route::get('/',          [PaymentAccountGroupController::class, 'index']);
+            Route::post('/',         [PaymentAccountGroupController::class, 'store']);
+            Route::get('/{id}',      [PaymentAccountGroupController::class, 'show']);
+            Route::put('/{id}',      [PaymentAccountGroupController::class, 'update']);
+            Route::delete('/{id}',   [PaymentAccountGroupController::class, 'destroy']);
+        });
+
+        // Payment Accounts (M3-003)
         Route::prefix('payment-accounts')->group(function () {
-            // TODO: Route::apiResource('', PaymentAccountController::class);
+            Route::get('/',              [PaymentAccountController::class, 'index']);
+            Route::post('/',             [PaymentAccountController::class, 'store']);
+            Route::get('/{id}',          [PaymentAccountController::class, 'show']);
+            Route::put('/{id}',          [PaymentAccountController::class, 'update']);
+            Route::patch('/{id}/status', [PaymentAccountController::class, 'toggleStatus']);
+            Route::delete('/{id}',       [PaymentAccountController::class, 'destroy']);
         });
 
         // Product Mappings (P0 Security)
@@ -118,6 +142,14 @@ Route::prefix('api/v1/admin')
             Route::patch('/{id}/status', [AdminMerchantController::class, 'changeStatus']);
             Route::patch('/{id}/level',  [AdminMerchantController::class, 'updateLevel']);
             Route::post('/{id}/review',  [AdminMerchantController::class, 'review']);
+
+            // Merchant Payment Group Mappings (M3-004)
+            Route::prefix('{id}/payment-group-mappings')->group(function () {
+                Route::get('/',              [PaymentGroupMappingController::class, 'index']);
+                Route::post('/',             [PaymentGroupMappingController::class, 'store']);
+                Route::put('/{mappingId}',   [PaymentGroupMappingController::class, 'update']);
+                Route::delete('/{mappingId}',[PaymentGroupMappingController::class, 'destroy']);
+            });
         });
 
         // Stores Management (M2-003)
@@ -139,11 +171,43 @@ Route::prefix('api/v1/admin')
         });
 
         Route::prefix('settlements')->group(function () {
-            // TODO: SettlementController — 结算管理
+            Route::get('/',           [\App\Http\Controllers\Admin\SettlementController::class, 'index']);
+            Route::get('/{id}',       [\App\Http\Controllers\Admin\SettlementController::class, 'show']);
+            Route::post('/generate',  [\App\Http\Controllers\Admin\SettlementController::class, 'generate']);
+
+            // 审核流程（M3-014）
+            Route::post('/{id}/submit-review', [\App\Http\Controllers\Admin\SettlementController::class, 'submitReview']);
+            Route::post('/{id}/approve',       [\App\Http\Controllers\Admin\SettlementController::class, 'approve']);
+            Route::post('/{id}/reject',        [\App\Http\Controllers\Admin\SettlementController::class, 'reject']);
+            Route::post('/{id}/mark-paid',     [\App\Http\Controllers\Admin\SettlementController::class, 'markPaid']);
+            Route::post('/{id}/cancel',        [\App\Http\Controllers\Admin\SettlementController::class, 'cancel']);
         });
 
+        // 退款影响管理（M3-015）
+        Route::prefix('refund-impact')->group(function () {
+            Route::get('/merchant/{merchantId}', [\App\Http\Controllers\Admin\RefundImpactController::class, 'summary']);
+            Route::post('/process',              [\App\Http\Controllers\Admin\RefundImpactController::class, 'process']);
+        });
+
+        // 黑名单管理（M3-018）
+        Route::apiResource('blacklist', BlacklistController::class);
+
+        // 风控仪表板（M3-016）
         Route::prefix('risk')->group(function () {
-            // TODO: RiskController — 风控管理
+            Route::get('dashboard', [RiskDashboardController::class, 'dashboard']);
+            Route::get('merchants/{merchantId}/score', [RiskDashboardController::class, 'merchantScore']);
+        });
+
+        // 佣金规则管理（M3-012）
+        Route::apiResource('commission-rules', CommissionRuleController::class);
+
+        // 安全描述管理（M3-010）
+        Route::apiResource('safe-descriptions', SafeDescriptionController::class);
+
+        // 通知管理（M3-022）
+        Route::prefix('notifications')->group(function () {
+            Route::get('/', [AdminNotificationController::class, 'index']);
+            Route::patch('/{id}/read', [AdminNotificationController::class, 'markAsRead']);
         });
 
         // RBAC Management
@@ -249,9 +313,16 @@ Route::prefix('api/v1/merchant')
             Route::get('/{id}', [MerchantOrderController::class, 'show']);
         });
 
-        // Settlements
+        // Settlements（M3-013 商户端结算查看）
         Route::prefix('settlements')->group(function () {
-            // TODO: MerchantSettlementController
+            Route::get('/', [MerchantSettlementController::class, 'index']);
+            Route::get('/{id}', [MerchantSettlementController::class, 'show']);
+        });
+
+        // 通知管理（M3-022 商户端）
+        Route::prefix('notifications')->group(function () {
+            Route::get('/', [MerchantNotificationController::class, 'index']);
+            Route::patch('/{id}/read', [MerchantNotificationController::class, 'markAsRead']);
         });
 
         // API Keys (RSA 密钥管理)
@@ -276,19 +347,15 @@ Route::prefix('api/v1/webhook')
     ->withoutMiddleware(['auth'])
     ->group(function () {
 
-        // PayPal IPN/Webhook
-        Route::post('paypal/ipn', function () {
-            // TODO: PayPalWebhookController@handleIpn
-        })->name('webhook.paypal.ipn');
+        // PayPal Webhook（M3-008）
+        Route::post('paypal', [\App\Http\Controllers\Api\PaymentController::class, 'paypalWebhook'])
+            ->middleware('verify.paypal.webhook')
+            ->name('webhook.paypal');
 
-        Route::post('paypal/webhook', function () {
-            // TODO: PayPalWebhookController@handleWebhook
-        })->name('webhook.paypal.webhook');
-
-        // Stripe Webhook
-        Route::post('stripe/webhook', function () {
-            // TODO: StripeWebhookController@handle
-        })->name('webhook.stripe');
+        // Stripe Webhook（M3-009）
+        Route::post('stripe', [\App\Http\Controllers\Api\StripeWebhookController::class, 'handle'])
+            ->middleware('verify.stripe.webhook')
+            ->name('webhook.stripe');
 
         // Logistics Provider Callbacks
         Route::post('logistics/{provider}/callback', function (string $provider) {

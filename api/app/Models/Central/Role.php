@@ -21,7 +21,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
  */
 class Role extends CentralModel
 {
-    protected $table = 'jh_roles';
+    protected $table = 'roles';
 
     protected $fillable = [
         'name',

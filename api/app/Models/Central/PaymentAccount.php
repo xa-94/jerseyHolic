@@ -46,6 +46,18 @@ use Illuminate\Database\Eloquent\SoftDeletes;
  * @property string $pay_url
  * @property string $domain
  * @property \Carbon\Carbon|null $daily_reset_date
+ * @property string $lifecycle_stage
+ * @property int    $health_score
+ * @property float  $daily_limit
+ * @property float  $monthly_limit
+ * @property float  $single_limit
+ * @property int    $daily_count_limit
+ * @property int    $total_success_count
+ * @property int    $total_fail_count
+ * @property int    $total_refund_count
+ * @property int    $total_dispute_count
+ * @property \Carbon\Carbon|null $last_used_at
+ * @property \Carbon\Carbon|null $cooling_until
  * @property \Carbon\Carbon $created_at
  * @property \Carbon\Carbon $updated_at
  * @property \Carbon\Carbon|null $deleted_at
@@ -54,7 +66,20 @@ class PaymentAccount extends CentralModel
 {
     use SoftDeletes;
 
-    protected $table = 'jh_payment_accounts';
+    protected $table = 'payment_accounts';
+
+    /** 生命周期阶段 */
+    public const LIFECYCLE_NEW     = 'new';
+    public const LIFECYCLE_GROWING = 'growing';
+    public const LIFECYCLE_MATURE  = 'mature';
+    public const LIFECYCLE_AGING   = 'aging';
+
+    public const LIFECYCLE_STAGES = [
+        self::LIFECYCLE_NEW,
+        self::LIFECYCLE_GROWING,
+        self::LIFECYCLE_MATURE,
+        self::LIFECYCLE_AGING,
+    ];
 
     protected $fillable = [
         'account',
@@ -88,6 +113,18 @@ class PaymentAccount extends CentralModel
         'pay_url',
         'domain',
         'daily_reset_date',
+        'lifecycle_stage',
+        'health_score',
+        'daily_limit',
+        'monthly_limit',
+        'single_limit',
+        'daily_count_limit',
+        'total_success_count',
+        'total_fail_count',
+        'total_refund_count',
+        'total_dispute_count',
+        'last_used_at',
+        'cooling_until',
     ];
 
     protected $hidden = [
@@ -114,6 +151,17 @@ class PaymentAccount extends CentralModel
         'error_time'             => 'datetime',
         'access_token_expires_at' => 'datetime',
         'daily_reset_date'       => 'date',
+        'health_score'           => 'integer',
+        'daily_limit'            => 'decimal:2',
+        'monthly_limit'          => 'decimal:2',
+        'single_limit'           => 'decimal:2',
+        'daily_count_limit'      => 'integer',
+        'total_success_count'    => 'integer',
+        'total_fail_count'       => 'integer',
+        'total_refund_count'     => 'integer',
+        'total_dispute_count'    => 'integer',
+        'last_used_at'           => 'datetime',
+        'cooling_until'          => 'datetime',
     ];
 
     /* ----------------------------------------------------------------
@@ -218,5 +266,40 @@ class PaymentAccount extends CentralModel
     public function hasError(): bool
     {
         return $this->error_time !== null;
+    }
+
+    /**
+     * 判断账号是否处于冷却期
+     */
+    public function isCooling(): bool
+    {
+        return $this->cooling_until !== null && $this->cooling_until->isFuture();
+    }
+
+    /**
+     * 按生命周期阶段筛选
+     */
+    public function scopeLifecycle(Builder $query, string $stage): Builder
+    {
+        return $query->where('lifecycle_stage', $stage);
+    }
+
+    /**
+     * 健康度大于等于指定分数
+     */
+    public function scopeHealthyEnough(Builder $query, int $minScore = 60): Builder
+    {
+        return $query->where('health_score', '>=', $minScore);
+    }
+
+    /**
+     * 非冷却中的账号
+     */
+    public function scopeNotCooling(Builder $query): Builder
+    {
+        return $query->where(function (Builder $q) {
+            $q->whereNull('cooling_until')
+              ->orWhere('cooling_until', '<=', now());
+        });
     }
 }

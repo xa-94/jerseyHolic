@@ -24,7 +24,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class Menu extends CentralModel
 {
-    protected $table = 'jh_menus';
+    protected $table = 'menus';
 
     protected $fillable = [
         'parent_id',

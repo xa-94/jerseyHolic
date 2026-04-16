@@ -26,7 +26,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class ProductSyncLog extends CentralModel
 {
-    protected $table = 'jh_product_sync_logs';
+    protected $table = 'product_sync_logs';
 
     protected $fillable = [
         'merchant_id',

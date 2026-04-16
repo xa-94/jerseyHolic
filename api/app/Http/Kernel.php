@@ -45,5 +45,8 @@ class Kernel extends HttpKernel
         'ensure.tenant'    => \App\Http\Middleware\EnsureTenantContext::class,
         'central.only'     => \App\Http\Middleware\PreventAccessFromTenantDomains::class,
         'merchant.store'   => \App\Http\Middleware\MerchantStoreAccess::class,
+        'verify.merchant.signature' => \App\Http\Middleware\VerifyMerchantSignature::class,
+        'verify.paypal.webhook'     => \App\Http\Middleware\VerifyPayPalWebhook::class,
+        'verify.stripe.webhook'     => \App\Http\Middleware\VerifyStripeWebhook::class,
     ];
 }

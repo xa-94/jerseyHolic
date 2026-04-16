@@ -16,7 +16,8 @@ return new class extends Migration
 
             $table->id();
             $table->string('domain', 255)->unique();
-            $table->foreignId('store_id')->constrained('stores')->onDelete('cascade');
+            $table->string('store_id', 36);
+            $table->foreign('store_id')->references('id')->on('stores')->onDelete('cascade');
             $table->boolean('is_primary')->default(false);
             $table->boolean('is_fallback')->default(false);
             $table->enum('certificate_status', ['pending', 'active', 'expired', 'failed'])->default('pending');

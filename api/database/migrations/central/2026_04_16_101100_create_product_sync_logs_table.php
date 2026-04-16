@@ -14,7 +14,8 @@ return new class extends Migration
             $table->id();
             $table->foreignId('merchant_id')->constrained('merchants')->onDelete('cascade');
             $table->unsignedBigInteger('source_store_id')->nullable()->comment('源站点(null=主商品库)');
-            $table->foreignId('target_store_id')->constrained('stores')->onDelete('cascade');
+            $table->string('target_store_id', 36);
+                        $table->foreign('target_store_id')->references('id')->on('stores')->onDelete('cascade');
             $table->enum('sync_type', ['full', 'incremental'])->default('incremental');
             $table->enum('trigger', ['manual', 'auto', 'scheduled'])->default('manual');
             $table->enum('status', ['pending', 'running', 'completed', 'failed', 'partial'])->default('pending');

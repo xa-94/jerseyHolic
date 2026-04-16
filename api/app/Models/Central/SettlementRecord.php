@@ -19,7 +19,10 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  * @property int    $order_count
  * @property \Carbon\Carbon $period_start
  * @property \Carbon\Carbon $period_end
- * @property int    $status
+ * @property int         $status
+ * @property int|null    $reviewed_by
+ * @property \Carbon\Carbon|null $reviewed_at
+ * @property string|null $transaction_ref
  * @property string|null $remark
  * @property \Carbon\Carbon|null $settled_at
  * @property \Carbon\Carbon $created_at
@@ -27,7 +30,7 @@ use Illuminate\Database\Eloquent\Relations\HasMany;
  */
 class SettlementRecord extends CentralModel
 {
-    protected $table = 'jh_merchant_settlements';
+    protected $table = 'merchant_settlements';
 
     protected $fillable = [
         'merchant_id',
@@ -39,6 +42,9 @@ class SettlementRecord extends CentralModel
         'period_start',
         'period_end',
         'status',
+        'reviewed_by',
+        'reviewed_at',
+        'transaction_ref',
         'remark',
         'settled_at',
     ];
@@ -52,6 +58,8 @@ class SettlementRecord extends CentralModel
         'period_start'      => 'date',
         'period_end'        => 'date',
         'status'            => 'integer',
+        'reviewed_by'       => 'integer',
+        'reviewed_at'       => 'datetime',
         'settled_at'        => 'datetime',
     ];
 

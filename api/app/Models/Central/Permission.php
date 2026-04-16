@@ -21,7 +21,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsToMany;
  */
 class Permission extends CentralModel
 {
-    protected $table = 'jh_permissions';
+    protected $table = 'permissions';
 
     protected $fillable = [
         'name',

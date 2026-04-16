@@ -42,7 +42,7 @@ class MerchantUser extends Authenticatable
      */
     protected $connection = 'central';
 
-    protected $table = 'jh_merchant_users';
+    protected $table = 'merchant_users';
 
     protected $fillable = [
         'merchant_id',

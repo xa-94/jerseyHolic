@@ -15,7 +15,8 @@ return new class extends Migration
             $table->engine = 'InnoDB';
 
             $table->id();
-            $table->foreignId('store_id')->constrained('stores')->onDelete('cascade');
+            $table->string('store_id', 36);
+                        $table->foreign('store_id')->references('id')->on('stores')->onDelete('cascade');
             $table->foreignId('payment_account_id')->constrained('payment_accounts')->onDelete('cascade');
             $table->integer('priority')->default(0);
             $table->boolean('is_active')->default(true);

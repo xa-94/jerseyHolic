@@ -16,6 +16,9 @@ class AppServiceProvider extends ServiceProvider
 
     public function boot(): void
     {
+        // Register central migrations path
+        $this->loadMigrationsFrom(database_path('migrations/central'));
+
         // Force HTTPS in production
         if ($this->app->environment('production')) {
             \Illuminate\Support\Facades\URL::forceScheme('https');

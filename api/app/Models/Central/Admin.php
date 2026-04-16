@@ -37,7 +37,7 @@ class Admin extends Authenticatable
 
     protected $connection = 'central';
 
-    protected $table = 'jh_admins';
+    protected $table = 'admins';
 
     protected $fillable = [
         'username',

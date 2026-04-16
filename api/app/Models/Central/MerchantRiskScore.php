@@ -21,7 +21,7 @@ use Illuminate\Database\Eloquent\Relations\BelongsTo;
  */
 class MerchantRiskScore extends CentralModel
 {
-    protected $table = 'jh_merchant_risk_scores';
+    protected $table = 'merchant_risk_scores';
 
     protected $fillable = [
         'merchant_id',

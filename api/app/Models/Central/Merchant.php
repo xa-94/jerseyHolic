@@ -36,7 +36,7 @@ class Merchant extends CentralModel
 {
     use SoftDeletes;
 
-    protected $table = 'jh_merchants';
+    protected $table = 'merchants';
 
     protected $fillable = [
         'merchant_name',
@@ -132,6 +132,30 @@ class Merchant extends CentralModel
     public function auditLogs(): HasMany
     {
         return $this->hasMany(MerchantAuditLog::class, 'merchant_id')->latest();
+    }
+
+    /**
+     * 商户的支付分组映射
+     */
+    public function paymentGroupMappings(): HasMany
+    {
+        return $this->hasMany(MerchantPaymentGroupMapping::class, 'merchant_id');
+    }
+
+    /**
+     * 商户的佣金规则
+     */
+    public function commissionRules(): HasMany
+    {
+        return $this->hasMany(CommissionRule::class, 'merchant_id');
+    }
+
+    /**
+     * 商户级黑名单
+     */
+    public function blacklistEntries(): HasMany
+    {
+        return $this->hasMany(Blacklist::class, 'merchant_id');
     }
 
     /* ----------------------------------------------------------------
