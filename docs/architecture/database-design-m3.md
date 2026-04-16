@@ -26,6 +26,8 @@
 
 **状态：** M1 已创建，M3 补充 `type` ENUM 语义说明。
 
+**迁移文件：** `database/migrations/central/2026_04_17_000200_create_payment_account_groups_table.php`
+
 ### 字段列表
 
 | 字段名 | 类型 | 默认值 | 约束 | 说明 |
@@ -67,6 +69,8 @@
 **说明：** 支付账号池表，存储各支付网关的账号信息、额度配置、收款统计。
 
 **状态：** M1 已创建，M3 补充字段说明（group_id 通过 `category_id` / `cc_category_id` 实现，lifecycle_stage / health_score 通过 `permission` / `error_time` / `error_msg` 等字段体现）。
+
+**迁移文件：** `database/migrations/central/2026_04_17_000300_add_m3_fields_to_payment_accounts_table.php`
 
 ### 字段列表
 
@@ -145,6 +149,8 @@
 
 **状态：** M3 新增。
 
+**迁移文件：** `database/migrations/central/2026_04_17_000400_create_merchant_payment_group_mappings_table.php`
+
 ### 字段列表
 
 | 字段名 | 类型 | 默认值 | 约束 | 说明 |
@@ -179,6 +185,8 @@
 **说明：** PayPal 安全描述映射表。将商品分类映射为 PayPal 可接受的安全名称和描述，降低 PayPal 风控拦截风险。
 
 **状态：** M3 新增。
+
+**迁移文件：** `database/migrations/central/2026_04_17_000500_create_paypal_safe_descriptions_table.php`
 
 ### 字段列表
 
@@ -217,6 +225,8 @@
 
 **状态：** M3 新增。
 
+**迁移文件：** `database/migrations/central/2026_04_17_000600_rebuild_blacklist_table_for_m3.php`
+
 ### 字段列表
 
 | 字段名 | 类型 | 默认值 | 约束 | 说明 |
@@ -254,6 +264,8 @@
 **说明：** 佣金规则表，定义平台对商户的抽佣费率。支持全局规则、商户级规则和站点级规则（三级优先级：站点 > 商户 > 全局）。
 
 **状态：** M3 新增。
+
+**迁移文件：** `database/migrations/central/2026_04_17_000700_create_commission_rules_table.php`
 
 ### 字段列表
 
@@ -406,6 +418,8 @@ net_amount = total_revenue - total_refunds - total_disputes - platform_fee - pay
 
 **状态：** M3 新增。
 
+**迁移文件：** `database/migrations/central/2026_04_17_000800_create_notifications_table.php`
+
 ### 字段列表
 
 | 字段名 | 类型 | 默认值 | 约束 | 说明 |
@@ -441,6 +455,16 @@ net_amount = total_revenue - total_refunds - total_disputes - platform_fee - pay
 | `settlement` | 结算通知 | 结算单生成、审核通过、打款完成 |
 | `account_issue` | 账号异常 | 支付账号余额不足、API 调用失败、Token 过期 |
 | `blacklist` | 黑名单通知 | 订单命中黑名单被拦截 |
+
+---
+
+## 9.5 jh_settlement_refund_adjustments
+
+**说明：** 结算退款调整表，记录结算后发生的退款对结算单的影响调整。
+
+**状态：** M3 新增。
+
+**迁移文件：** `database/migrations/central/2026_04_17_000900_create_settlement_refund_adjustments_table.php`
 
 ---
 

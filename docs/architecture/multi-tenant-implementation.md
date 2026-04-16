@@ -1,8 +1,8 @@
 # JerseyHolic 多租户架构实现文档
 
-> **版本**: v3.0  
+> **版本**: v3.1  
 > **日期**: 2026-04-17  
-> **里程碑**: Phase M1 + Phase M2 + Phase M3  
+> **里程碑**: Phase M1 + Phase M2 + Phase M3 (Implementation)  
 > **核心依赖**: stancl/tenancy ^3.8
 
 ---
@@ -17,6 +17,7 @@
 6. [租户识别中间件工作原理](#6-租户识别中间件工作原理)
 7. [Phase M2 商户管理核心架构](#phase-m2-商户管理核心架构)
 8. [Phase M3 支付与结算架构](#phase-m3-支付与结算架构)
+9. [Phase M3 支付与结算实现详情](#phase-m3-支付与结算实现详情)
 
 ---
 
@@ -1010,7 +1011,7 @@ foreach ($merchant->stores as $store) {
 
 ## Phase M3 支付与结算架构
 
-> **版本**: v3.0  
+> **版本**: v3.1  
 > **日期**: 2026-04-17  
 > **里程碑**: Phase M3 — 支付与结算核心架构
 
@@ -1338,4 +1339,143 @@ graph TB
 | `app/Services/NotificationService.php` | 消息推送服务 |
 | `app/Services/MerchantRiskService.php` | 风控评分服务 |
 | `app/Services/BlacklistService.php` | 黑名单服务 |
+
+---
+
+## Phase M3 支付与结算实现详情
+
+> **版本**: v3.1  
+> **日期**: 2026-04-17  
+> **里程碑**: Phase M3 — 支付与结算实现落地
+
+---
+
+### 1. M3 实现概览
+
+Phase M3 完成了支付与结算模块的全部实现，涵盖支付网关接入、选号算法、Webhook 处理、月结结算、风控体系五大核心能力。
+
+**模块架构（请求流向）：**
+
+```
+买家支付请求流:
+  Buyer Request → PaymentController → ElectionService（8层选号）
+    → PayPalGateway / StripeGateway → 第三方支付平台
+
+Webhook 回调流:
+  PayPal/Stripe Webhook 入口 → 签名验证中间件（VerifyPayPalWebhook / VerifyStripeWebhook）
+    → WebhookHandler → dispatch ProcessPaymentWebhookJob（异步处理）
+
+月结结算流:
+  Scheduler → GenerateSettlementJob → SettlementService（跨 Tenant DB 聚合，Store::run()）
+    → CommissionService（佣金计算引擎）→ 生成结算单
+
+风控体系流:
+  交易数据 → MerchantRiskService（5维度加权评分）→ 动态限额调整
+    → BlacklistService（4维度拦截）→ 隔离分组路由
+```
+
+---
+
+### 2. 核心服务实现
+
+#### 2.1 PaymentGatewayInterface 抽象与实现
+
+支付网关采用 **接口抽象 + 工厂模式** 设计，`PaymentGatewayInterface` 定义统一契约，由 `PayPalGateway` 和 `StripeGateway` 分别实现：
+
+| 网关 | 支付模式 | 核心方法 |
+|------|---------|----------|
+| `PayPalGateway` | REST API v2（Create→Approve→Capture）+ Hosted Fields 信用卡直付 | `createOrder()`, `capturePayment()`, `refund()`, `uploadTracking()` |
+| `StripeGateway` | Checkout Session 托管页面 | `createCheckoutSession()`, `handleWebhook()`, `refund()` |
+
+`PaymentGatewayFactory::create($payMethod)` 根据订单的 `pay_method` 字段动态创建对应网关实例。
+
+#### 2.2 ElectionService 8 层筛选
+
+选号服务实现完整的 8 层漏斗式筛选，为每笔交易选择最优支付账号：
+
+| 层级 | 名称 | 说明 |
+|------|------|------|
+| L1 | 黑名单过滤 | 排除命中黑名单的账号（IP/Email/Device/Payment Account 4维度）|
+| L2 | 分组映射 | PaymentGroupMappingService 三层查询（Domain→Merchant→Default）|
+| L3 | 可用状态 | 仅保留 `status = active` 的账号 |
+| L4 | 优先级/生命周期 | 排除 cooling/frozen/new 阶段账号 |
+| L5 | 限额检查 | 日限额 `daily_used < daily_limit` + 单笔限额 `amount ≤ per_transaction_limit` |
+| L6 | 健康度 | 退款率 `refund_rate_7d < threshold` |
+| L7 | 限频 | 同账号间隔 ≥ 3min，同 IP 24h 内 ≤ 3 个不同账号 |
+| L8 | 容灾/负载均衡 | 按 weight 权重加权随机；主分组耗尽→放宽健康度→跳过限频→LITE_SHARED 兜底→exhausted |
+
+#### 2.3 SettlementService 跨 Tenant 聚合
+
+结算服务通过 `Store::run()` 遍历租户数据库，在每个 Tenant 上下文中聚合订单和佣金数据：
+
+```php
+foreach ($merchant->stores()->where('status', 1)->get() as $store) {
+    $store->run(function () use (&$results, $store, $period) {
+        $results[$store->id] = [
+            'total_orders'     => Order::whereBetween('created_at', $period)->count(),
+            'total_revenue'    => Order::whereBetween('created_at', $period)->sum('total'),
+            'total_commission' => Order::whereBetween('created_at', $period)->sum('commission'),
+        ];
+    });
+}
+```
+
+聚合结果写入 Central DB 的 `jh_settlement_records` + `jh_settlement_details`。单次最多聚合 50 个站点，超过时拆分为子任务异步执行。
+
+#### 2.4 SafeDescriptionService 三层防护
+
+商品描述脱敏服务（`PayPalDescriptionService`）实现三层防护机制，确保传递给支付平台的描述不包含敏感品牌信息：
+
+| 优先级 | 层级 | 数据来源 | 说明 |
+|--------|------|---------|------|
+| 1（最高）| 站点级模板 | `jh_paypal_safe_descriptions WHERE store_id = X` | 站点自定义安全描述 |
+| 2 | 全局品类映射 | `jh_paypal_safe_descriptions WHERE store_id IS NULL` | 平台级默认规则 |
+| 3（兜底）| 动态轮换 | 同表按 `weight` 权重加权随机选取 | 防止固定描述模式被检测 |
+
+---
+
+### 3. 安全机制
+
+#### 3.1 RSA-SHA256 签名验证 + Nonce 防重放
+
+`VerifyMerchantSignature` 中间件应用于资金操作接口，四步验证流程：
+
+1. **Timestamp 检查** — 请求时间戳与服务器时间差 ≤ ±5 分钟
+2. **Nonce 防重放** — Redis `SET NX` + TTL 10min，确保每个 Nonce 仅使用一次
+3. **公钥查询** — 从 `jh_merchant_api_keys` 查找 merchant 的 active 密钥
+4. **RSA-SHA256 验签** — 构造待签名字符串 `METHOD\nURI\nTIMESTAMP\nBODY_HASH`，验证签名完整性
+
+#### 3.2 PayPal/Stripe Webhook 签名验证
+
+| 中间件 | 算法 | 验证方式 |
+|--------|------|----------|
+| `VerifyPayPalWebhook` | SHA-256 with CRC32 | 调用 PayPal Verify Webhook Signature API 远程验签 |
+| `VerifyStripeWebhook` | HMAC-SHA256 | 本地计算 `hash_hmac('sha256', "{timestamp}.{payload}", secret)` |
+
+两者均实现 **Redis SETNX 幂等检查**：`event_id:store_id`，TTL 72h，防止重复处理。
+
+#### 3.3 黑名单 4 维度拦截
+
+`BlacklistService` 实现 4 维度实时拦截：
+
+| 维度 | 字段 | 说明 |
+|------|------|------|
+| IP 地址 | `ip_address` | 买家请求 IP |
+| 邮箱 | `email` | 买家注册/支付邮箱 |
+| 设备指纹 | `device_fingerprint` | 前端采集的设备指纹 |
+| 支付账号 | `payment_account` | PayPal 邮箱/Stripe Customer ID |
+
+命中黑名单的交易自动路由到 `BLACKLIST_ISOLATED` 隔离分组，与正常账号池完全隔离。
+
+---
+
+### 4. 代码产出统计
+
+| 类别 | 数量 | 说明 |
+|------|------|------|
+| Payment Service 文件 | 18 | 支付网关、选号、脱敏、生命周期、Webhook 处理等 |
+| Admin Controller | 10 | 支付账户管理、结算管理、风控管理、黑名单管理等 |
+| 中间件 | 3 | `VerifyMerchantSignature`、`VerifyPayPalWebhook`、`VerifyStripeWebhook` |
+| 数据库迁移 | 8 | Central DB 支付相关表（payment_accounts、settlement_records 等）|
+| 测试文件 | 12 | 92 个测试用例，覆盖选号、佣金计算、Webhook、签名验证等 |
 

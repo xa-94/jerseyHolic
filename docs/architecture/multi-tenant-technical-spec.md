@@ -1,8 +1,8 @@
 # JerseyHolic 多租户技术规范
 
-> **版本**: v3.0  
+> **版本**: v3.1  
 > **日期**: 2026-04-17  
-> **阶段**: Phase M1 + Phase M2 + Phase M3  
+> **阶段**: Phase M1 + Phase M2 + Phase M3 (Implementation)  
 > **包**: stancl/tenancy v3  
 > **框架**: Laravel 10  
 
@@ -31,6 +31,10 @@
    - 6.6 结算聚合查询优化
    - 6.7 RSA 签名验证技术细节
    - 6.8 消息推送技术实现
+   - 6.9 Webhook 处理流程
+   - 6.10 错误处理策略
+   - 6.11 金额精度规范
+   - 6.12 CodeReview 修复记录
 
 ---
 
@@ -1601,3 +1605,130 @@ if (!$isNew) {
 | NotificationService | `api/app/Services/NotificationService.php` |
 | MerchantRiskService | `api/app/Services/MerchantRiskService.php` |
 | BlacklistService | `api/app/Services/BlacklistService.php` |
+
+---
+
+### 6.9 Webhook 处理流程
+
+#### 6.9.1 PayPal Webhook 完整处理链路
+
+```
+PayPal Webhook → VerifyPayPalWebhook 中间件（API 签名验证）
+    → Redis SETNX 幂等检查（event_id:store_id, TTL 72h）
+    → dispatch ProcessPaymentWebhookJob（queue=payment, tries=3）
+    → PayPalWebhookHandler 处理事件
+        - PAYMENT.CAPTURE.COMPLETED → 更新订单为 paid
+        - PAYMENT.CAPTURE.DENIED → 标记支付失败
+        - CUSTOMER.DISPUTE.CREATED → 创建争议记录 + 通知管理员
+```
+
+#### 6.9.2 Stripe Webhook 完整处理链路
+
+```
+Stripe Webhook → VerifyStripeWebhook 中间件（HMAC-SHA256 本地验签）
+    → Redis SETNX 幂等检查（event_id:store_id, TTL 72h）
+    → dispatch ProcessPaymentWebhookJob（queue=payment, tries=3）
+    → StripeWebhookHandler 处理事件
+        - checkout.session.completed → 更新订单为 paid
+        - charge.refunded → 记录退款
+        - charge.dispute.created → 创建争议记录
+```
+
+#### 6.9.3 幂等性保障
+
+```php
+// Redis SETNX 防重复处理
+$idempotencyKey = "webhook:{$eventId}:{$storeId}";
+$isNew = Redis::set($idempotencyKey, 1, 'EX', 259200, 'NX');  // TTL 72h (3天)
+
+if (!$isNew) {
+    Log::info("Webhook event already processed", ['event_id' => $eventId]);
+    return response()->json(['status' => 'already_processed'], 200);
+}
+```
+
+#### 6.9.4 storeId 提取策略
+
+- PayPal：从 payload 的 `custom_id` 字段提取 `store_id`（创建订单时写入）
+- Stripe：从 Session `metadata.store_id` 提取
+
+---
+
+### 6.10 错误处理策略
+
+#### 6.10.1 PayPal OAuth2 Token 缓存失效
+
+```
+PayPal API 请求 → 401 Unauthorized
+    → 自动刷新 Token（调用 /v1/oauth2/token）
+    → Redis key: paypal_token:{account_id}, TTL 由 PayPal 返回的 expires_in 决定
+    → 重试原始请求
+```
+
+#### 6.10.2 Webhook 处理失败重试
+
+| 配置项 | 值 | 说明 |
+|---------|-----|------|
+| queue | `payment` | 独立支付队列 |
+| tries | 3 | 最多重试 3 次 |
+| backoff | `[30, 120, 300]` | 递增重试间隔（30s → 2min → 5min）|
+| timeout | 120 | 单次处理超时 2 分钟 |
+
+失败后记录到 `failed_jobs` 表（Central DB），触发钉钉告警通知。
+
+#### 6.10.3 选号无可用账号容灾
+
+```
+8 层筛选全部通过后无候选账号
+    → Step 1: 放宽健康度阈值（refund_rate_7d < threshold * 1.5）
+    → Step 2: 跳过限频检查（Layer 7）
+    → Step 3: 降级到 LITE_SHARED 兜底分组
+    → Step 4: 仍无可用 → 抛出 NoAvailableAccountException
+    → 记录 exhausted 日志 + 触发紧急告警
+```
+
+---
+
+### 6.11 金额精度规范
+
+#### 6.11.1 全链路 bcmath 字符串计算
+
+| 规则 | 说明 |
+|------|------|
+| 禁止 float 运算 | 全链路使用 `bcadd()`, `bcsub()`, `bcmul()`, `bcdiv()` 字符串计算 |
+| 中间精度 | 4 位小数（避免多步计算累积误差）|
+| 输出精度 | 2 位小数（最终金额字段）|
+| 数据库类型 | `DECIMAL(14,2)`，禁止 `FLOAT`/`DOUBLE` |
+
+#### 6.11.2 Stripe Cents 转换
+
+```php
+// 标准货币（如 USD）：金额 * 100 转为 cents
+$amountInCents = (int) bcmul($amount, '100', 0);
+
+// 零小数货币（如 JPY）：直接使用整数金额
+$zeroDecimalCurrencies = ['JPY', 'KRW', 'VND', 'CLP', 'BIF', /* ... */];
+if (in_array($currency, $zeroDecimalCurrencies)) {
+    $amountInCents = (int) $amount;
+}
+```
+
+#### 6.11.3 佣金范围约束
+
+```php
+// 佣金率硬约束：[8%, 35%]
+$finalRate = max('0.08', min('0.35', $calculatedRate));  // bcmath 字符串比较
+$commission = bcmul($orderTotalUsd, $finalRate, 2);
+```
+
+---
+
+### 6.12 CodeReview 修复记录
+
+以下为 Phase M3 开发过程中 CodeReview 发现并修复的关键问题：
+
+| # | 问题 | 涉及服务 | 修复方案 |
+|---|------|---------|----------|
+| 1 | 配置键不一致 | `TransactionSimulationService` | 统一配置键命名规范，修复 config key 引用与实际定义不匹配问题 |
+| 2 | float→string 全链路 bcmath 修复 | `AccountLifecycleService` + `ElectionService` | 将所有 float 类型金额计算替换为 bcmath 字符串操作，消除浮点精度问题 |
+| 3 | PayPal Webhook storeId 提取 | `PayPalWebhookHandler` | 从 payload 的 `custom_id` 字段提取 storeId，而非从 URL 路径参数获取 |

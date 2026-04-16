@@ -1,6 +1,6 @@
 # JerseyHolic 支付 API 文档
 
-> Phase M3 产出。覆盖支付网关接口、Admin 支付管理接口（支付账号分组、三层映射、安全描述、黑名单、结算、佣金规则、风控、通知）以及 Merchant 支付相关接口。
+> ✅ Phase M3 已实现。覆盖支付网关接口、Admin 支付管理接口（支付账号分组、三层映射、安全描述、黑名单、结算、佣金规则、风控、通知）以及 Merchant 支付相关接口。
 
 ---
 
@@ -11,10 +11,12 @@
 3. [Merchant 支付相关接口](#3-merchant-支付相关接口)
 4. [错误码说明](#4-错误码说明)
 5. [安全说明](#5-安全说明)
+6. [中间件说明](#6-中间件说明)
+7. [实际路由注册摘要](#7-实际路由注册摘要)
 
 ---
 
-## 1. 支付网关接口
+## 1. 支付网关接口 ✅ Phase M3 已实现
 
 > 前缀：`/api/v1/payment`（Tenant 路由）  
 > 中间件：`api`, `tenant`, `force.json`, `set.locale`  
@@ -191,7 +193,7 @@
 
 ---
 
-## 2. Admin 支付管理接口
+## 2. Admin 支付管理接口 ✅ Phase M3 已实现
 
 > 路由前缀：`/api/v1/admin`  
 > 认证方式：Bearer Token（admin guard — `auth:sanctum`）  
@@ -1140,7 +1142,7 @@
 
 ---
 
-## 3. Merchant 支付相关接口
+## 3. Merchant 支付相关接口 ✅ Phase M3 已实现
 
 > 路由前缀：`/api/v1/merchant`  
 > 认证方式：Bearer Token（`auth:merchant`）  
@@ -1298,7 +1300,7 @@
 
 ---
 
-## 4. 错误码说明
+## 4. 错误码说明 ✅ Phase M3 已实现
 
 ### 4.1 支付相关错误码
 
@@ -1322,7 +1324,7 @@
 
 ---
 
-## 5. 安全说明
+## 5. 安全说明 ✅ Phase M3 已实现
 
 ### 5.1 RSA 签名验证
 
@@ -1355,3 +1357,53 @@ X-Timestamp: 1713340800
 - **PayPal**：通过 `PAYPAL-TRANSMISSION-SIG` 和 `PAYPAL-CERT-URL` 验证 Webhook 签名
 - **Stripe**：通过 `Stripe-Signature` Header 和 Webhook Signing Secret 验证
 - 所有 Webhook 端点实现**幂等处理**，重复事件不会导致重复操作
+
+---
+
+## 6. 中间件说明 ✅ Phase M3 已实现
+
+| 中间件 | 算法 | 说明 |
+|--------|------|------|
+| `verify.merchant.signature` | RSA-SHA256 | 商户签名验证，Timestamp ±5min 时间窗口校验，Nonce 通过 Redis SETNX 防重放 |
+| `verify.paypal.webhook` | PayPal Verify Webhook Signature API | 调用 PayPal 官方 API 验证 Webhook 签名真实性 |
+| `verify.stripe.webhook` | HMAC-SHA256 | 通过 `Stripe-Signature` header 验签，容差 300s |
+
+---
+
+## 7. 实际路由注册摘要 ✅ Phase M3 已实现
+
+### 7.1 Admin 路由（`auth:sanctum` 保护）
+
+| 路由注册 | 说明 |
+|---------|------|
+| `apiResource('payment-account-groups')` | 分组 CRUD |
+| `apiResource('payment-accounts')` | 账号 CRUD + 状态切换 |
+| `apiResource('payment-group-mappings')` | 三层映射 |
+| `apiResource('safe-descriptions')` | 脱敏模板 |
+| `apiResource('commission-rules')` | 佣金规则 |
+| `apiResource('blacklist')` | 黑名单 |
+| `settlements/` | 结算管理（列表/详情/生成/审核/打款/拒绝/取消） |
+| `risk/dashboard` + `risk/merchants/{id}/score` | 风控仪表板 |
+| `refund-impact/` | 退款影响 |
+| `notifications/` | 通知管理 |
+
+### 7.2 Merchant 路由
+
+| 路由注册 | 说明 |
+|---------|------|
+| `settlements/` | 商户查看结算单 |
+| `notifications/` | 商户通知 |
+
+### 7.3 Webhook 路由（无 auth）
+
+| Method | URI | 中间件 |
+|--------|-----|--------|
+| `POST` | `/webhooks/paypal` | `verify.paypal.webhook` |
+| `POST` | `/webhooks/stripe` | `verify.stripe.webhook` |
+
+### 7.4 Tenant 路由（`auth:sanctum` 买家）
+
+| Method | URI | 说明 |
+|--------|-----|------|
+| `POST` | `/payment/create` | 创建支付 |
+| `POST` | `/payment/capture/{orderNo}` | 捕获支付 |
