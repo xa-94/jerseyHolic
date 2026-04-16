@@ -1,7 +1,8 @@
 # JerseyHolic 多租户 API 路由架构文档
 
-> Phase M1 基础架构阶段产出，Phase M2 更新补充商户管理相关端点。本文档描述多租户路由体系、已实现端点清单及后续阶段预留端点。  
-> 商户 API 详细说明（请求/响应格式）请参阅 [merchant-api.md](./merchant-api.md)。
+> Phase M1 基础架构阶段产出，Phase M2 更新补充商户管理相关端点，Phase M3 更新支付与结算相关端点。本文档描述多租户路由体系、已实现端点清单及后续阶段预留端点。  
+> 商户 API 详细说明（请求/响应格式）请参阅 [merchant-api.md](./merchant-api.md)。  
+> 支付 API 详细说明请参阅 [payment-api.md](./payment-api.md)。
 
 ---
 
@@ -174,19 +175,39 @@
 | POST | `/api/v1/admin/rbac/admins/{id}/roles` | `RbacController@assignRoles` | 分配角色 |
 | GET | `/api/v1/admin/rbac/admins/{id}/permissions` | `RbacController@adminPermissions` | 管理员权限 |
 
-### 3.3 Central 路由 — M3-M6 实现
+### 3.3 Central 路由 — M3-M6 规划与实现
+
+**Phase M3 规划中（支付与结算相关）**
+
+| 路由前缀 | 预期 Controller | 说明 | 详细文档 |
+|----------|----------------|------|----------|
+| `/api/v1/admin/payment-accounts` | PaymentAccountController | 支付账户管理 | [payment-api.md](./payment-api.md) §2.3 |
+| `/api/v1/admin/payment-account-groups` | PaymentAccountGroupController | 支付账号分组管理 | [payment-api.md](./payment-api.md) §2.1 |
+| `/api/v1/admin/merchants/{id}/payment-group-mappings` | PaymentGroupMappingController | 三层映射管理 | [payment-api.md](./payment-api.md) §2.2 |
+| `/api/v1/admin/safe-descriptions` | SafeDescriptionController | PayPal 安全描述管理 | [payment-api.md](./payment-api.md) §2.4 |
+| `/api/v1/admin/blacklist` | BlacklistController | 黑名单管理 | [payment-api.md](./payment-api.md) §2.5 |
+| `/api/v1/admin/settlements` | SettlementController | 结算管理 | [payment-api.md](./payment-api.md) §2.6 |
+| `/api/v1/admin/commission-rules` | CommissionRuleController | 佣金规则管理 | [payment-api.md](./payment-api.md) §2.7 |
+| `/api/v1/admin/risk` | RiskController | 风控管理 | [payment-api.md](./payment-api.md) §2.8 |
+| `/api/v1/admin/notifications` | NotificationController | 通知管理 | [payment-api.md](./payment-api.md) §2.9 |
+| `/api/v1/admin/product-mappings` | ProductMappingController | 商品映射（P0 安全） | — |
+| `/api/v1/admin/customers` | CustomerController | 客户管理 | — |
+| `/api/v1/admin/settings` | SettingController | 系统设置 | — |
+| `/api/v1/admin/logs` | OperationLogController | 操作日志 | — |
+
+**Phase M3 规划中（支付网关 Tenant 路由）**
+
+| 路由前缀 | 预期 Controller | 说明 |
+|----------|----------------|------|
+| `/api/v1/payment/paypal/*` | PayPalController | PayPal 创建订单 / Capture / Webhook |
+| `/api/v1/payment/stripe/*` | StripeController | Stripe Checkout Session / Webhook |
+
+**M4-M6 待实现**
 
 | 路由前缀 | 预期 Controller | 计划阶段 | 说明 |
 |----------|----------------|---------|------|
-| `/api/v1/admin/payment-accounts` | PaymentAccountController | M3 | 支付账户管理 |
-| `/api/v1/admin/product-mappings` | ProductMappingController | M3 | 商品映射（P0 安全） |
-| `/api/v1/admin/customers` | CustomerController | M3 | 客户管理 |
 | `/api/v1/admin/shipments` | ShipmentController | M4 | 物流管理 |
-| `/api/v1/admin/settlements` | SettlementController | M5 | 结算管理 |
-| `/api/v1/admin/risk` | RiskController | M6 | 风控管理 |
-| `/api/v1/admin/settings` | SettingController | M3 | 系统设置 |
 | `/api/v1/admin/fb-pixels` | FbPixelController | M4 | Facebook Pixel |
-| `/api/v1/admin/logs` | OperationLogController | M3 | 操作日志 |
 
 ### 3.4 Merchant 路由组 — Phase M2 已实现
 
@@ -225,25 +246,32 @@
 | POST | `/api/v1/merchant/api-keys/{keyId}/rotate` | `ApiKeyController@rotate` | 轮换密钥 |
 | DELETE | `/api/v1/merchant/api-keys/{keyId}` | `ApiKeyController@revoke` | 吊销密钥 |
 
-**待实现（M3+）**
+**Phase M3 规划中**
+
+| 路由前缀 | 预期 Controller | 说明 | 详细文档 |
+|----------|----------------|------|----------|
+| `/api/v1/merchant/settlements` | MerchantSettlementController | 结算查看 | [payment-api.md](./payment-api.md) §3.1-3.2 |
+| `/api/v1/merchant/notifications` | MerchantNotificationController | 站内通知 | [payment-api.md](./payment-api.md) §3.3-3.4 |
+
+**待实现（M4+）**
 
 | 路由前缀 | 预期 Controller | 说明 |
 |----------|----------------|------|
 | `/api/v1/merchant/shop` | MerchantShopController | 店铺管理 |
 | `/api/v1/merchant/products` | MerchantProductController | 商品管理 |
-| `/api/v1/merchant/settlements` | MerchantSettlementController | 结算查看 |
 
-### 3.5 Webhook 路由 — TODO 占位
+### 3.5 Webhook 路由 — Phase M3 规划中
 
-> 前缀：`/api/v1/webhook`，无需认证
+> 前缀：`/api/v1/webhook`（Central）及 `/api/v1/payment/*/webhook`（Tenant），无需认证  
+> 详细文档：[payment-api.md](./payment-api.md) §1.3, §1.5
 
-| 方法 | 路径 | 预期 Controller | 说明 |
-|------|------|----------------|------|
-| POST | `/api/v1/webhook/paypal/ipn` | PayPalWebhookController@handleIpn | PayPal IPN |
-| POST | `/api/v1/webhook/paypal/webhook` | PayPalWebhookController@handleWebhook | PayPal Webhook |
-| POST | `/api/v1/webhook/stripe/webhook` | StripeWebhookController@handle | Stripe Webhook |
-| POST | `/api/v1/webhook/logistics/{provider}/callback` | LogisticsWebhookController@handle | 物流回调 |
-| POST | `/api/v1/webhook/antom/notify` | AntomWebhookController@handle | Antom 支付回调 |
+| 方法 | 路径 | 预期 Controller | 阶段 | 说明 |
+|------|------|----------------|------|------|
+| POST | `/api/v1/payment/paypal/webhook` | PayPalController@webhook | M3 | PayPal Webhook（Tenant 路由） |
+| POST | `/api/v1/payment/stripe/webhook` | StripeController@webhook | M3 | Stripe Webhook（Tenant 路由） |
+| POST | `/api/v1/webhook/paypal/ipn` | PayPalWebhookController@handleIpn | M3 | PayPal IPN（Central 路由） |
+| POST | `/api/v1/webhook/logistics/{provider}/callback` | LogisticsWebhookController@handle | M4 | 物流回调 |
+| POST | `/api/v1/webhook/antom/notify` | AntomWebhookController@handle | M4+ | Antom 支付回调 |
 
 ---
 
@@ -407,9 +435,18 @@ api/routes/
 4. Merchant 受保护 API：仪表盘、站点列表、子账号管理、订单查看、RSA 密钥管理
 5. Sanctum 三套认证体系（sanctum / merchant / customers）完整配置
 
-### M3+ 待实现
+### Phase M3 规划中
 
-1. Webhook 回调处理逻辑
-2. 支付账户、商品映射、客户管理、物流管理（M3-M4）
-3. 商户店铺管理、商品管理、结算查看 API（M3+）
-4. 结算管理、风控管理（M5-M6）
+1. 支付网关集成：PayPal 创建/Capture/Webhook + Stripe Checkout Session/Webhook
+2. Admin 支付管理：支付账号分组、三层映射、安全描述、黑名单、结算、佣金规则、风控、通知
+3. Merchant 支付相关：结算查看、站内通知
+4. 支付账户管理、商品映射、客户管理
+
+> 详细端点说明请参阅 [payment-api.md](./payment-api.md)
+> 数据库设计请参阅 [database-design-m3.md](../architecture/database-design-m3.md)
+
+### M4+ 待实现
+
+1. 物流管理（M4）
+2. Facebook Pixel（M4）
+3. 商户店铺管理、商品管理 API（M4+）

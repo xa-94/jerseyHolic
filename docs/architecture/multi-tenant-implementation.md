@@ -1,8 +1,8 @@
 # JerseyHolic 多租户架构实现文档
 
-> **版本**: v1.0  
+> **版本**: v3.0  
 > **日期**: 2026-04-17  
-> **里程碑**: Phase M1 — 多租户基础架构  
+> **里程碑**: Phase M1 + Phase M2 + Phase M3  
 > **核心依赖**: stancl/tenancy ^3.8
 
 ---
@@ -15,6 +15,8 @@
 4. [域名→站点→数据库自动识别与切换机制](#4-域名站点数据库自动识别与切换机制)
 5. [StoreProvisioningService 实现细节](#5-storeprovisioningservice-实现细节)
 6. [租户识别中间件工作原理](#6-租户识别中间件工作原理)
+7. [Phase M2 商户管理核心架构](#phase-m2-商户管理核心架构)
+8. [Phase M3 支付与结算架构](#phase-m3-支付与结算架构)
 
 ---
 
@@ -1003,4 +1005,337 @@ foreach ($merchant->stores as $store) {
 | `app/Http/Controllers/Merchant/OrderController.php` | 单/跨站点订单查询 |
 | `app/Http/Middleware/MerchantStoreAccess.php` | 商户站点三级权限隔离中间件 |
 | `app/Models/Central/MerchantAuditLog.php` | 商户审核日志 |
+
+---
+
+## Phase M3 支付与结算架构
+
+> **版本**: v3.0  
+> **日期**: 2026-04-17  
+> **里程碑**: Phase M3 — 支付与结算核心架构
+
+---
+
+### 1. 支付网关架构
+
+系统采用 **工厂模式 + 策略模式** 实现支付网关的可扩展设计，通过 `PaymentGatewayFactory` 根据订单的 `pay_method` 字段动态创建对应的支付网关实例。
+
+```mermaid
+graph TB
+    Order[Order pay_method] --> Factory[PaymentGatewayFactory]
+    Factory -->|paypal| PayPal[PayPalGateway]
+    Factory -->|stripe| Stripe[StripeGateway]
+    PayPal --> Standard[标准支付流程<br/>Create Order → Approve → Capture]
+    PayPal --> HostedFields[信用卡直付<br/>Hosted Fields]
+    Stripe --> Checkout[Checkout Session 模式]
+    PayPal --> TrackingAPI[Tracking API<br/>发货后上传 tracking number]
+    Webhook[Webhook 入口] --> WebhookController[WebhookController<br/>路由分发]
+    WebhookController --> PayPalHandler[PayPalWebhookHandler]
+    WebhookController --> StripeHandler[StripeWebhookHandler]
+```
+
+**PayPalGateway 支付流程：**
+
+| 步骤 | 操作 | 说明 |
+|------|------|------|
+| 1 | Create Order | 调用 PayPal REST API v2 创建订单，返回 approval URL |
+| 2 | Approve | 买家在 PayPal 页面授权付款 |
+| 3 | Capture | 商户捕获付款，资金到账 |
+| 4 | Tracking | 发货后通过 Tracking API 上传物流信息 |
+
+**StripeGateway 支付流程：**
+
+通过 Stripe Checkout Session 模式，创建 Session 后重定向买家到 Stripe 托管支付页面，支付完成后通过 Webhook 通知。
+
+**Webhook 统一处理：**
+
+`WebhookController` 作为统一入口，根据请求路径 (`/webhook/paypal`, `/webhook/stripe`) 分发到对应的 Handler。每个 Handler 负责验签和业务逻辑处理。
+
+---
+
+### 2. 商品描述脱敏架构
+
+**PayPalDescriptionService** 实现三层防护机制，确保支付时传递给 PayPal 的商品描述不包含敏感品牌信息：
+
+```mermaid
+graph TB
+    Order[订单商品] --> L1{Layer 1<br/>全局品类映射}
+    L1 -->|匹配| L1Result[使用全局安全描述]
+    L1 -->|未匹配| L2{Layer 2<br/>站点级模板}
+    L2 -->|匹配| L2Result[使用站点安全描述]
+    L2 -->|未匹配| L3{Layer 3<br/>动态轮换}
+    L3 --> L3Result[按权重随机选取]
+    L1Result --> Final[最终安全描述]
+    L2Result --> Final
+    L3Result --> Final
+```
+
+**三层防护说明：**
+
+| 层级 | 数据来源 | 说明 |
+|------|---------|------|
+| Layer 1 — 全局品类映射 | `jh_paypal_safe_descriptions WHERE store_id IS NULL` | 平台级默认安全描述，适用于所有站点 |
+| Layer 2 — 站点级模板 | `jh_paypal_safe_descriptions WHERE store_id = X` | 站点自定义安全描述，优先于全局 |
+| Layer 3 — 动态轮换 | 同表按 `weight` 权重随机选取 | 防止 PayPal 检测到固定描述模式 |
+
+> **优先级规则**：站点级描述 > 全局描述。当同一品类在站点级和全局级都有配置时，优先使用站点级。
+
+---
+
+### 3. 选号算法架构
+
+**ElectionService** 实现完整的 8 层筛选流程，为每笔交易选择最优的 PayPal 支付账号：
+
+```mermaid
+graph TB
+    Start[交易请求] --> L1[Layer 1: 分组映射<br/>PaymentGroupMappingService]
+    L1 --> L2[Layer 2: 账号状态过滤<br/>status = active]
+    L2 --> L3[Layer 3: 生命周期阶段<br/>排除 cooling/frozen]
+    L3 --> L4[Layer 4: 日限额检查<br/>daily_amount < daily_limit]
+    L4 --> L5[Layer 5: 单笔限额检查<br/>order_amount ≤ per_transaction_limit]
+    L5 --> L6[Layer 6: 退款率检查<br/>refund_rate < threshold]
+    L6 --> L7[Layer 7: 币种匹配<br/>支持订单币种]
+    L7 --> L8[Layer 8: 负载均衡<br/>按权重随机选取]
+    L8 --> Result[选定支付账号]
+    L4 -->|无可用账号| Fallback[容灾降级<br/>LITE_SHARED 分组]
+    L5 -->|无可用账号| Fallback
+    L6 -->|无可用账号| Fallback
+```
+
+**PaymentGroupMappingService 三层映射：**
+
+| 优先级 | 映射维度 | 说明 |
+|--------|---------|------|
+| 1（最高） | Domain → Group | 按域名精确匹配支付分组 |
+| 2 | Merchant → Group | 按商户匹配支付分组 |
+| 3（最低） | Default Group | 默认全局分组 |
+
+**缓存策略：**
+- Redis 缓存 TTL：5 分钟
+- 缓存 Key：`election:group:{store_id}`
+- 缓存失效：账号状态变更时主动清除
+
+**容灾处理：**
+- 主分组账号全部耗尽（限额/冷却/冻结）时，自动降级到 `LITE_SHARED` 共享分组
+- `LITE_SHARED` 分组为平台级兜底分组，佣金比例较高
+
+---
+
+### 4. 账号温养策略
+
+**AccountLifecycleService** 管理支付账号的全生命周期，实现 4 阶段自动流转：
+
+```mermaid
+graph LR
+    NEW[NEW<br/>新账号] -->|满足准入条件| WARMING[WARMING<br/>温养期]
+    WARMING -->|达到交易量阈值| ACTIVE[ACTIVE<br/>正常运营]
+    ACTIVE -->|触发冷却条件| COOLING[COOLING<br/>冷却期]
+    COOLING -->|冷却期结束| ACTIVE
+    ACTIVE -->|风险触发| FROZEN[FROZEN<br/>冻结]
+```
+
+**4 阶段说明：**
+
+| 阶段 | 限制 | 流转条件 |
+|------|------|----------|
+| NEW → WARMING | 仅小额交易（≤$50）、低频（≤3笔/天） | 完成 10 笔交易且无争议 |
+| WARMING → ACTIVE | 逐步放开限额 | 累计交易额达 $500 |
+| ACTIVE → COOLING | 暂停使用 | 日退款率超 2% 或连续投诉 |
+| COOLING → ACTIVE | 冷却期 7-14 天 | 冷却期满且退款率恢复正常 |
+
+**交易行为约束：**
+
+| 约束项 | 规则 | 说明 |
+|--------|------|------|
+| 金额波动 | 相邻交易金额差 ≤ 30% | 避免触发 PayPal 异常检测 |
+| 时间限频 | 同账号间隔 ≥ 3 分钟 | 模拟真实交易节奏 |
+| IP 监控 | 同 IP 24h 内使用不同账号 ≤ 3 个 | 防止关联检测 |
+
+**退款率实时监控与自动降级：**
+- 实时计算 7 日滑动窗口退款率
+- 退款率 > 1.5%：发送预警通知
+- 退款率 > 2%：自动进入 COOLING 状态
+- 退款率 > 5%：自动进入 FROZEN 状态
+
+---
+
+### 5. 佣金与结算架构
+
+```mermaid
+graph TB
+    Order[订单完成] --> Commission[CommissionService<br/>佣金计算引擎]
+    Commission --> Base[基础佣金率]
+    Commission --> Volume[成交量调整]
+    Commission --> Loyalty[忠诚度奖励]
+    Commission --> FinalRate[最终佣金率<br/>范围 8% ~ 35%]
+    FinalRate --> Settlement[SettlementService<br/>结算聚合]
+    Settlement --> CrossTenant[跨 Tenant DB 聚合<br/>Store::run]
+    Settlement --> Job[GenerateSettlementJob<br/>月结定时任务]
+    Job --> Review[结算审核流程<br/>draft → pending_review<br/>→ approved → paid]
+```
+
+**CommissionService 佣金计算引擎：**
+
+佣金率由三个维度叠加计算，最终范围限制在 `[8%, 35%]`：
+
+| 维度 | 说明 | 影响 |
+|------|------|------|
+| 基础佣金率 | 由商户等级决定 | starter:20%, standard:18%, advanced:15%, vip:12% |
+| 成交量调整 | 月成交量越高，佣金率越低 | 每 $10K 降 0.5%，最多降 5% |
+| 忠诚度奖励 | 合作时长越久，佣金率越低 | 每满 6 个月降 0.5%，最多降 3% |
+
+**SettlementService 结算聚合：**
+- 使用 `Store::run()` 跨 Tenant DB 聚合查询各站点的订单和佣金数据
+- 聚合结果写入 Central DB 的 `jh_settlement_records` 和 `jh_settlement_details`
+
+**GenerateSettlementJob 月结定时任务：**
+- 每月 1 号凌晨自动执行
+- 汇总上月所有已完成订单的佣金
+- 生成结算单（status = draft）
+
+**结算审核流程：**
+
+| 状态 | 说明 | 操作人 |
+|------|------|--------|
+| `draft` | 系统自动生成 | 系统 |
+| `pending_review` | 提交审核 | 商户/系统 |
+| `approved` | 审核通过 | 平台管理员 |
+| `paid` | 已打款 | 平台财务 |
+
+---
+
+### 6. RSA 签名验证架构
+
+**VerifyMerchantSignature 中间件** 仅应用于资金操作相关接口（支付、退款、结算），确保请求来源合法且数据未被篡改。
+
+```mermaid
+sequenceDiagram
+    participant Client as 商户客户端
+    participant MW as VerifyMerchantSignature
+    participant Redis
+    participant DB as Central DB
+
+    Client->>MW: 请求（携带签名头）
+    MW->>MW: 1. Timestamp 检查（±5min）
+    MW->>Redis: 2. Nonce 防重放（SET NX TTL 10min）
+    Redis-->>MW: OK / FAIL
+    MW->>DB: 3. 查询公钥（jh_merchant_api_keys）
+    DB-->>MW: 公钥 PEM
+    MW->>MW: 4. RSA-SHA256 验签
+    MW-->>Client: 通过 / 403 SIGNATURE_INVALID
+```
+
+**验签流程四步骤：**
+
+| 步骤 | 操作 | 失败响应 |
+|------|------|----------|
+| 1 | Timestamp 检查 | 时间戳与服务器时间差超 ±5 分钟 → 403 |
+| 2 | Nonce 防重放 | Redis SET NX 失败（重复请求）→ 403 |
+| 3 | 公钥查询 | 查找 merchant 的 active 密钥 |
+| 4 | RSA-SHA256 验签 | 签名不匹配 → 403 |
+
+**MerchantSignatureClient SDK：**
+- 提供 Guzzle 中间件，自动为每个请求添加签名头
+- 签名头包含：`X-Timestamp`、`X-Nonce`、`X-Key-Id`、`X-Signature`
+
+---
+
+### 7. 消息推送架构
+
+**NotificationService** 提供双通道消息推送能力：站内通知 + 钉钉 Webhook。
+
+```mermaid
+graph TB
+    Trigger[触发场景] --> NS[NotificationService]
+    NS --> InApp[站内通知<br/>jh_notifications 表]
+    NS --> DingTalk[钉钉 Webhook<br/>异步推送]
+    InApp --> Read[已读/未读状态管理]
+    DingTalk --> Queue[Laravel Queue<br/>异步发送]
+```
+
+**触发场景：**
+
+| 场景 | 通知渠道 | 优先级 |
+|------|---------|--------|
+| 风险告警（退款率超标/异常交易） | 站内 + 钉钉 | 高 |
+| 结算提醒（结算单生成/审核通过/打款） | 站内 + 钉钉 | 中 |
+| 账号异常（冷却/冻结/解冻） | 站内 + 钉钉 | 高 |
+| 黑名单命中 | 站内 + 钉钉 | 紧急 |
+
+**异步推送机制：** 所有外部推送（钉钉 Webhook）通过 Laravel Queue 异步发送，不阻塞主流程。
+
+---
+
+### 8. 风控架构
+
+**MerchantRiskService** 实现 5 维度加权评分模型，实时评估商户风险等级：
+
+```mermaid
+graph TB
+    Input[商户交易数据] --> D1[维度1: 退款率<br/>权重 30%]
+    Input --> D2[维度2: 争议率<br/>权重 25%]
+    Input --> D3[维度3: 交易异常<br/>权重 20%]
+    Input --> D4[维度4: 账号健康度<br/>权重 15%]
+    Input --> D5[维度5: 历史信用<br/>权重 10%]
+    D1 --> Score[加权总分 0~100]
+    D2 --> Score
+    D3 --> Score
+    D4 --> Score
+    D5 --> Score
+    Score --> LimitAdj[动态限额调整<br/>risk score → 限额系数]
+    Score --> Alert[风险告警]
+```
+
+**5 维度评分模型：**
+
+| 维度 | 权重 | 评分指标 |
+|------|------|----------|
+| 退款率 | 30% | 7 日/30 日退款率 |
+| 争议率 | 25% | PayPal Dispute 比例 |
+| 交易异常 | 20% | 金额异常、频率异常、IP 异常 |
+| 账号健康度 | 15% | 账号年龄、验证状态、历史限制 |
+| 历史信用 | 10% | 合作时长、累计交易额、历史违规次数 |
+
+**动态限额调整：**
+
+| Risk Score 范围 | 限额系数 | 说明 |
+|----------------|---------|------|
+| 0 ~ 30 | 1.0 | 正常限额 |
+| 31 ~ 60 | 0.7 | 限额下调 30% |
+| 61 ~ 80 | 0.4 | 限额下调 60% |
+| 81 ~ 100 | 0.1 | 限额下调 90%（接近冻结）|
+
+**BlacklistService 黑名单机制：**
+
+| 触发方式 | 说明 |
+|---------|------|
+| 自动触发 | Risk Score ≥ 90 持续 24h 自动加入黑名单 |
+| 手动干预 | 平台管理员手动添加/移除 |
+
+**黑名单路由：** 命中黑名单的商户/IP/邮箱，其交易请求的支付账号自动路由到 `BLACKLIST_ISOLATED` 隔离分组，与正常账号池完全隔离。
+
+---
+
+### 附录（Phase M3）：关键文件索引
+
+| 文件 | 说明 |
+|------|------|
+| `app/Services/Payment/PaymentGatewayFactory.php` | 支付网关工厂 |
+| `app/Services/Payment/PayPalGateway.php` | PayPal 支付网关实现 |
+| `app/Services/Payment/StripeGateway.php` | Stripe 支付网关实现 |
+| `app/Http/Controllers/Webhook/WebhookController.php` | Webhook 统一入口 |
+| `app/Services/Payment/PayPalWebhookHandler.php` | PayPal Webhook 处理 |
+| `app/Services/Payment/StripeWebhookHandler.php` | Stripe Webhook 处理 |
+| `app/Services/Payment/PayPalDescriptionService.php` | 商品描述脱敏服务 |
+| `app/Services/Payment/ElectionService.php` | 支付账号选号服务 |
+| `app/Services/Payment/PaymentGroupMappingService.php` | 支付分组映射服务 |
+| `app/Services/Payment/AccountLifecycleService.php` | 账号生命周期管理 |
+| `app/Services/CommissionService.php` | 佣金计算引擎 |
+| `app/Services/SettlementService.php` | 结算聚合服务 |
+| `app/Jobs/GenerateSettlementJob.php` | 月结定时任务 |
+| `app/Http/Middleware/VerifyMerchantSignature.php` | RSA 签名验证中间件 |
+| `app/Services/MerchantSignatureClient.php` | 商户签名 SDK |
+| `app/Services/NotificationService.php` | 消息推送服务 |
+| `app/Services/MerchantRiskService.php` | 风控评分服务 |
+| `app/Services/BlacklistService.php` | 黑名单服务 |
 

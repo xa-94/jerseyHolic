@@ -1,8 +1,8 @@
 # JerseyHolic 多租户技术规范
 
-> **版本**: v2.0  
+> **版本**: v3.0  
 > **日期**: 2026-04-17  
-> **阶段**: Phase M1 + Phase M2  
+> **阶段**: Phase M1 + Phase M2 + Phase M3  
 > **包**: stancl/tenancy v3  
 > **框架**: Laravel 10  
 
@@ -22,6 +22,15 @@
    - 5.5 MerchantDatabaseService — 商户库创建
    - 5.6 MerchantStoreAccess 中间件
    - 5.7 MerchantUserService — 子账号管理
+6. [Phase M3：支付与结算技术规范](#6-phase-m3支付与结算技术规范)
+   - 6.1 支付网关技术实现
+   - 6.2 商品描述脱敏实现
+   - 6.3 ElectionService 8层筛选实现
+   - 6.4 账号生命周期管理
+   - 6.5 佣金计算精度保障
+   - 6.6 结算聚合查询优化
+   - 6.7 RSA 签名验证技术细节
+   - 6.8 消息推送技术实现
 
 ---
 
@@ -1182,3 +1191,413 @@ if ($target->merchant_id !== $operator->merchant_id) {
 | MerchantDatabaseService | `api/app/Services/MerchantDatabaseService.php` |
 | MerchantUserService | `api/app/Services/MerchantUserService.php` |
 | MerchantStoreAccess 中间件 | `api/app/Http/Middleware/MerchantStoreAccess.php` |
+
+---
+
+## 6. Phase M3：支付与结算技术规范
+
+### 6.1 支付网关技术实现
+
+#### 6.1.1 PayPal REST API v2 集成
+
+**认证方式：** OAuth 2.0 Client Credentials
+
+```
+POST https://api-m.paypal.com/v1/oauth2/token
+Authorization: Basic {base64(client_id:client_secret)}
+Content-Type: application/x-www-form-urlencoded
+
+grant_type=client_credentials
+```
+
+**标准支付流程 API：**
+
+| 步骤 | 方法 | Endpoint | 说明 |
+|------|------|----------|------|
+| Create Order | POST | `/v2/checkout/orders` | 创建订单，返回 `id` 和 `approve` 链接 |
+| Capture | POST | `/v2/checkout/orders/{id}/capture` | 捕获付款，资金到账 |
+| Get Order | GET | `/v2/checkout/orders/{id}` | 查询订单状态 |
+| Refund | POST | `/v2/payments/captures/{capture_id}/refund` | 发起退款 |
+| Tracking | POST | `/v1/shipping/trackers-batch` | 批量上传物流信息 |
+
+**Create Order 请求体示例：**
+
+```json
+{
+  "intent": "CAPTURE",
+  "purchase_units": [{
+    "reference_id": "{order_no}",
+    "description": "{safe_description}",
+    "amount": {
+      "currency_code": "USD",
+      "value": "99.00",
+      "breakdown": {
+        "item_total": {"currency_code": "USD", "value": "89.00"},
+        "shipping":   {"currency_code": "USD", "value": "10.00"}
+      }
+    }
+  }],
+  "application_context": {
+    "return_url": "https://{domain}/payment/success",
+    "cancel_url": "https://{domain}/payment/cancel"
+  }
+}
+```
+
+**信用卡直付（Hosted Fields）：**
+- 前端集成 PayPal JS SDK Hosted Fields
+- 服务端使用 `advanced-checkout` 参数创建 Order
+- 支持 3D Secure 验证
+
+#### 6.1.2 Stripe API 集成
+
+**认证方式：** Bearer Token (Secret Key)
+
+```
+Authorization: Bearer sk_live_xxx
+```
+
+**Checkout Session 创建：**
+
+```
+POST https://api.stripe.com/v1/checkout/sessions
+```
+
+| 参数 | 值 | 说明 |
+|------|-----|------|
+| `mode` | `payment` | 一次性支付 |
+| `payment_method_types[]` | `card` | 支持信用卡 |
+| `line_items[]` | 商品列表 | 商品名称、金额、数量 |
+| `success_url` | `https://{domain}/payment/success?session_id={CHECKOUT_SESSION_ID}` | 成功回调 |
+| `cancel_url` | `https://{domain}/payment/cancel` | 取消回调 |
+| `metadata` | `{order_no, store_id}` | 业务元数据 |
+
+#### 6.1.3 Webhook 签名验证
+
+**PayPal Webhook 验签：**
+- 算法：SHA-256 with CRC32
+- 验证流程：调用 PayPal Verify Webhook Signature API
+- Endpoint：`POST /v1/notifications/verify-webhook-signature`
+- 请求携带：webhook_id、transmission_id、transmission_time、cert_url、auth_algo、transmission_sig、webhook_event
+
+**Stripe Webhook 验签：**
+- 算法：HMAC-SHA256
+- 头部：`Stripe-Signature: t=timestamp,v1=signature`
+- 验证流程：`hash_hmac('sha256', "{timestamp}.{payload}", webhook_secret)`
+- 时间容差：±5 分钟
+
+---
+
+### 6.2 商品描述脱敏实现
+
+#### 6.2.1 jh_paypal_safe_descriptions 表结构
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | BIGINT UNSIGNED PK | 自增主键 |
+| `store_id` | BIGINT UNSIGNED NULL | 站点 ID，NULL 表示全局规则 |
+| `category_keyword` | VARCHAR(100) | 品类关键词（如 jersey, shoes）|
+| `safe_name` | VARCHAR(255) | 安全商品名称 |
+| `safe_description` | TEXT | 安全商品描述 |
+| `weight` | INT DEFAULT 1 | 随机选取权重 |
+| `status` | TINYINT DEFAULT 1 | 0=disabled, 1=enabled |
+| `created_at` / `updated_at` | TIMESTAMP | 时间戳 |
+
+索引：`(store_id, category_keyword, status)`
+
+#### 6.2.2 权重随机选取算法
+
+```php
+// 加权随机选取（Weighted Random Selection）
+$totalWeight = $descriptions->sum('weight');
+$random = mt_rand(1, $totalWeight);
+$cumulative = 0;
+
+foreach ($descriptions as $desc) {
+    $cumulative += $desc->weight;
+    if ($random <= $cumulative) {
+        return $desc;
+    }
+}
+```
+
+#### 6.2.3 缓存策略
+
+- 缓存 Key：`paypal_safe_desc:{store_id}:{category_keyword}`
+- TTL：30 分钟
+- 失效：管理员更新脱敏规则时主动清除
+
+---
+
+### 6.3 ElectionService 8 层筛选实现
+
+#### 6.3.1 每层筛选条件
+
+| 层 | 名称 | 筛选条件 | 数据源 |
+|---|------|---------|-------|
+| 1 | 分组映射 | PaymentGroupMappingService 三层查询 | `jh_payment_group_mappings` |
+| 2 | 账号状态 | `status = 'active'` | `jh_payment_accounts` |
+| 3 | 生命周期 | `lifecycle_stage NOT IN ('cooling', 'frozen', 'new')` | `jh_payment_accounts` |
+| 4 | 日限额 | `daily_used_amount < daily_limit` | `jh_payment_account_logs`（当日聚合） |
+| 5 | 单笔限额 | `order_amount ≤ per_transaction_limit` | `jh_payment_accounts` |
+| 6 | 退款率 | `refund_rate_7d < refund_threshold` | 实时计算 |
+| 7 | 币种匹配 | 账号 `supported_currencies` 包含订单币种 | `jh_payment_accounts` |
+| 8 | 负载均衡 | 按 `weight` 权重加权随机 | 筛选后候选集 |
+
+#### 6.3.2 三层映射查询流程
+
+```sql
+-- 优先级1：Domain 精确匹配
+SELECT group_id FROM jh_payment_group_mappings
+  WHERE mapping_type = 'domain' AND mapping_value = :domain LIMIT 1;
+
+-- 优先级2：Merchant 匹配
+SELECT group_id FROM jh_payment_group_mappings
+  WHERE mapping_type = 'merchant' AND mapping_value = :merchant_id LIMIT 1;
+
+-- 优先级3：默认分组
+SELECT group_id FROM jh_payment_account_groups
+  WHERE is_default = 1 LIMIT 1;
+```
+
+#### 6.3.3 容灾降级策略
+
+```
+主分组账号全部不可用（限额耗尽 / 冷却 / 冻结）
+  → 打日志 warning
+  → 查询 LITE_SHARED 分组（is_fallback = 1）
+  → 对 LITE_SHARED 分组执行 Layer 2~8 筛选
+  → 仍无可用 → 抛出 NoAvailableAccountException
+```
+
+---
+
+### 6.4 账号生命周期管理
+
+#### 6.4.1 阶段判定条件和流转逻辑
+
+| 当前阶段 | 目标阶段 | 流转条件 |
+|---------|---------|----------|
+| NEW | WARMING | 账号创建超 24h 且通过基本验证 |
+| WARMING | ACTIVE | 累计完成 10 笔交易 且 累计交易额 ≥ $500 且 无争议 |
+| ACTIVE | COOLING | 7日退款率 > 2% 或 收到连续投诉 |
+| COOLING | ACTIVE | 冷却期满 7~14 天 且 退款率恢复 < 1% |
+| ACTIVE | FROZEN | Risk Score ≥ 80 持续 24h 或 PayPal 主动限制 |
+
+#### 6.4.2 各阶段限额配置表
+
+| 阶段 | 单笔上限 | 日限额 | 月限额 | 日最大笔数 |
+|------|---------|-------|-------|----------|
+| NEW | $50 | $100 | $500 | 3 |
+| WARMING | $200 | $500 | $5,000 | 10 |
+| ACTIVE | $2,000 | $10,000 | $100,000 | 50 |
+| COOLING | $0 | $0 | $0 | 0 |
+| FROZEN | $0 | $0 | $0 | 0 |
+
+#### 6.4.3 交易行为约束参数
+
+```php
+const BEHAVIOR_CONSTRAINTS = [
+    'amount_variance_max'       => 0.30,   // 相邻交易金额最大差异 30%
+    'min_interval_seconds'      => 180,    // 同账号最小交易间隔 3min
+    'max_accounts_per_ip_24h'   => 3,      // 同 IP 24h 内最多使用不同账号数
+    'max_daily_transactions'    => 50,     // 单账号日最大交易笔数
+    'refund_warning_threshold'  => 0.015,  // 退款率预警阈值 1.5%
+    'refund_cooling_threshold'  => 0.02,   // 退款率冷却阈值 2%
+    'refund_frozen_threshold'   => 0.05,   // 退款率冻结阈值 5%
+];
+```
+
+---
+
+### 6.5 佣金计算精度保障
+
+#### 6.5.1 精度要求
+
+- 所有金额字段均使用 `DECIMAL(14,2)`，禁止使用 `FLOAT`/`DOUBLE`
+- PHP 层使用 `bcmath` 扩展进行计算，避免浮点误差
+
+#### 6.5.2 多币种统一转 USD 汇率处理
+
+```php
+// 汇率获取优先级：
+// 1. 订单创建时的实时汇率（order.exchange_rate）
+// 2. 当日 ECB 汇率（缓存 24h）
+// 3. 配置的固定汇率（兑底）
+
+$usdAmount = bcmul($originalAmount, $exchangeRate, 2);
+```
+
+#### 6.5.3 佣金计算公式完整定义
+
+```
+base_rate       = LEVEL_BASE_RATES[merchant.level]
+volume_discount = min(floor(monthly_volume / 10000) * 0.005, 0.05)
+loyalty_discount = min(floor(months_active / 6) * 0.005, 0.03)
+
+final_rate = clamp(base_rate - volume_discount - loyalty_discount, 0.08, 0.35)
+commission = order.total_usd * final_rate
+```
+
+其中 `clamp(value, min, max)` 确保佣金率始终在 `[8%, 35%]` 范围内。
+
+---
+
+### 6.6 结算聚合查询优化
+
+#### 6.6.1 Store::run() 跨 Tenant DB 聚合方式
+
+```php
+$results = [];
+$stores = $merchant->stores()->where('status', 1)->get();
+
+foreach ($stores as $store) {
+    try {
+        $store->run(function () use (&$results, $store, $startDate, $endDate) {
+            $results[$store->id] = [
+                'total_orders'     => Order::whereBetween('created_at', [$startDate, $endDate])->count(),
+                'total_revenue'    => Order::whereBetween('created_at', [$startDate, $endDate])->sum('total'),
+                'total_commission' => Order::whereBetween('created_at', [$startDate, $endDate])->sum('commission'),
+            ];
+        });
+    } catch (\Throwable $e) {
+        Log::error("Settlement aggregation failed for store {$store->id}", ['error' => $e->getMessage()]);
+        $results[$store->id] = ['error' => $e->getMessage()];
+    }
+}
+```
+
+#### 6.6.2 异步聚合 + 缓存方案
+
+- **定时预聚合**：`GenerateSettlementJob` 每月 1 号凌晨执行，结果写入 `jh_settlement_records`
+- **缓存聚合结果**：结算单生成后缓存 24h，Key：`settlement:{merchant_id}:{period}`
+- **增量更新**：订单完成时通过事件更新当月累计数据
+
+#### 6.6.3 单次聚合站点上限
+
+- 单次聚合最多 50 个站点
+- 超过 50 个时拆分为多个子任务，通过 Job 异步执行
+- 每个子任务完成后合并结果
+
+---
+
+### 6.7 RSA 签名验证技术细节
+
+#### 6.7.1 待签名字符串构造规则
+
+```
+sign_string = HTTP_METHOD + "\n" + URI + "\n" + TIMESTAMP + "\n" + BODY_HASH
+```
+
+| 组件 | 说明 | 示例 |
+|------|------|------|
+| `HTTP_METHOD` | 大写 HTTP 方法 | `POST` |
+| `URI` | 请求路径（不含 query string）| `/api/v1/merchant/payments/capture` |
+| `TIMESTAMP` | Unix 时间戳（秒）| `1713340800` |
+| `BODY_HASH` | 请求体的 SHA-256 哈希（空体为空字符串的 hash）| `e3b0c44298fc1c14...` |
+
+#### 6.7.2 RSA-SHA256 验签算法
+
+```php
+// 验签方（服务端）
+$signString = "{$method}\n{$uri}\n{$timestamp}\n{$bodyHash}";
+$publicKey  = openssl_pkey_get_public($publicKeyPem);
+$verified   = openssl_verify($signString, base64_decode($signature), $publicKey, OPENSSL_ALGO_SHA256);
+// $verified === 1 表示验签成功
+
+// 签名方（客户端 SDK）
+openssl_sign($signString, $signature, $privateKey, OPENSSL_ALGO_SHA256);
+$signatureBase64 = base64_encode($signature);
+```
+
+#### 6.7.3 Nonce 唯一性校验
+
+```php
+// Redis SET NX 防重放
+$nonceKey = "nonce:{$keyId}:{$nonce}";
+$isNew = Redis::set($nonceKey, 1, 'EX', 600, 'NX');  // TTL 10min
+
+if (!$isNew) {
+    // Nonce 已使用，拒绝请求
+    abort(403, 'NONCE_REUSED');
+}
+```
+
+---
+
+### 6.8 消息推送技术实现
+
+#### 6.8.1 站内通知
+
+**jh_notifications 表结构：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | BIGINT UNSIGNED PK | 自增主键 |
+| `merchant_id` | BIGINT UNSIGNED | 商户 ID |
+| `type` | VARCHAR(50) | 通知类型（risk_alert / settlement / account / blacklist）|
+| `title` | VARCHAR(255) | 通知标题 |
+| `content` | TEXT | 通知内容 |
+| `level` | ENUM('info','warning','danger','urgent') | 紧急级别 |
+| `is_read` | TINYINT(1) DEFAULT 0 | 是否已读 |
+| `read_at` | TIMESTAMP NULL | 读取时间 |
+| `data` | JSON NULL | 附加数据（如订单号、账号 ID）|
+| `created_at` / `updated_at` | TIMESTAMP | 时间戳 |
+
+索引：`(merchant_id, is_read, created_at)`
+
+**已读/未读状态管理：**
+- 单条标读：`PUT /merchant/notifications/{id}/read`
+- 批量标读：`POST /merchant/notifications/read-all`
+- 未读计数：`GET /merchant/notifications/unread-count`
+
+#### 6.8.2 钉钉推送
+
+**Webhook URL 配置：**
+
+```php
+// config/services.php
+'dingtalk' => [
+    'webhook_url' => env('DINGTALK_WEBHOOK_URL'),
+    'secret'      => env('DINGTALK_SECRET'),  // 加签密钥
+],
+```
+
+**消息模板：**
+
+```json
+{
+  "msgtype": "markdown",
+  "markdown": {
+    "title": "[风险告警] 商户 {merchant_name}",
+    "text": "### 风险告警\n- **商户**: {merchant_name}\n- **类型**: {alert_type}\n- **详情**: {detail}\n- **时间**: {time}"
+  }
+}
+```
+
+**加签验证：** 使用 HMAC-SHA256 对 `timestamp + "\n" + secret` 签名，确保请求合法性。
+
+---
+
+## 附录（Phase M3）：文件索引
+
+| 类别 | 文件路径 |
+|------|--------|
+| PaymentGatewayFactory | `api/app/Services/Payment/PaymentGatewayFactory.php` |
+| PayPalGateway | `api/app/Services/Payment/PayPalGateway.php` |
+| StripeGateway | `api/app/Services/Payment/StripeGateway.php` |
+| WebhookController | `api/app/Http/Controllers/Webhook/WebhookController.php` |
+| PayPalWebhookHandler | `api/app/Services/Payment/PayPalWebhookHandler.php` |
+| StripeWebhookHandler | `api/app/Services/Payment/StripeWebhookHandler.php` |
+| PayPalDescriptionService | `api/app/Services/Payment/PayPalDescriptionService.php` |
+| ElectionService | `api/app/Services/Payment/ElectionService.php` |
+| PaymentGroupMappingService | `api/app/Services/Payment/PaymentGroupMappingService.php` |
+| AccountLifecycleService | `api/app/Services/Payment/AccountLifecycleService.php` |
+| CommissionService | `api/app/Services/CommissionService.php` |
+| SettlementService | `api/app/Services/SettlementService.php` |
+| GenerateSettlementJob | `api/app/Jobs/GenerateSettlementJob.php` |
+| VerifyMerchantSignature | `api/app/Http/Middleware/VerifyMerchantSignature.php` |
+| MerchantSignatureClient | `api/app/Services/MerchantSignatureClient.php` |
+| NotificationService | `api/app/Services/NotificationService.php` |
+| MerchantRiskService | `api/app/Services/MerchantRiskService.php` |
+| BlacklistService | `api/app/Services/BlacklistService.php` |
