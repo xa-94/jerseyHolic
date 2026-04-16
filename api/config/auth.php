@@ -14,6 +14,10 @@ return [
             'driver' => 'sanctum',
             'provider' => null,
         ],
+        'merchant' => [
+            'driver' => 'sanctum',
+            'provider' => 'merchant_users',
+        ],
     ],
     'providers' => [
         'admins' => [
@@ -24,6 +28,10 @@ return [
             'driver' => 'eloquent',
             'model' => App\Models\Merchant::class,
         ],
+        'merchant_users' => [
+            'driver' => 'eloquent',
+            'model' => App\Models\Central\MerchantUser::class,
+        ],
         'customers' => [
             'driver' => 'eloquent',
             'model' => App\Models\Customer::class,
@@ -33,6 +41,12 @@ return [
         'customers' => [
             'provider' => 'customers',
             'table' => 'jh_password_reset_tokens',
+            'expire' => 60,
+            'throttle' => 60,
+        ],
+        'merchant_users' => [
+            'provider' => 'merchant_users',
+            'table' => 'password_reset_tokens',
             'expire' => 60,
             'throttle' => 60,
         ],

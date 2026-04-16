@@ -9,7 +9,7 @@
         "laravel/sanctum": "^3.3",
         "laravel/tinker": "^2.8",
         "predis/predis": "^3.4",
-        "stancl/tenancy": "^3.8"
+        "stancl/tenancy": "3.8"
     },
     "require-dev": {
         "dedoc/scramble": "^0.13.18",

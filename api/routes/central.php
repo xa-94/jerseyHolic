@@ -1,4 +1,4 @@
-<?php
+﻿<?php
 
 /**
  * Central Routes — 平台管理 & 商户后台路由。
@@ -25,6 +25,8 @@ use App\Http\Controllers\Admin\AuthController as AdminAuthController;
 use App\Http\Controllers\Admin\ProductController as AdminProductController;
 use App\Http\Controllers\Admin\CategoryController as AdminCategoryController;
 use App\Http\Controllers\Admin\OrderController as AdminOrderController;
+use App\Http\Controllers\Admin\MerchantController as AdminMerchantController;
+use App\Http\Controllers\Admin\StoreController as AdminStoreController;
 
 // Admin auth (public)
 Route::prefix('api/v1/admin/auth')->middleware(['force.json'])->group(function () {
@@ -108,11 +110,32 @@ Route::prefix('api/v1/admin')
 
         // Merchants / Stores Management (multi-tenant admin)
         Route::prefix('merchants')->group(function () {
-            // TODO: MerchantController — 商户列表、审核、封禁
+            Route::get('/',              [AdminMerchantController::class, 'index']);
+            Route::post('/',             [AdminMerchantController::class, 'store']);
+            Route::get('/{id}',          [AdminMerchantController::class, 'show']);
+            Route::put('/{id}',          [AdminMerchantController::class, 'update']);
+            Route::delete('/{id}',       [AdminMerchantController::class, 'destroy']);
+            Route::patch('/{id}/status', [AdminMerchantController::class, 'changeStatus']);
+            Route::patch('/{id}/level',  [AdminMerchantController::class, 'updateLevel']);
+            Route::post('/{id}/review',  [AdminMerchantController::class, 'review']);
         });
 
+        // Stores Management (M2-003)
         Route::prefix('stores')->group(function () {
-            // TODO: StoreController — 站点列表、创建、配置
+            Route::get('/',                          [AdminStoreController::class, 'index']);
+            Route::post('/',                         [AdminStoreController::class, 'store']);
+            Route::get('/{id}',                      [AdminStoreController::class, 'show']);
+            Route::put('/{id}',                      [AdminStoreController::class, 'update']);
+            Route::delete('/{id}',                   [AdminStoreController::class, 'destroy']);
+            Route::patch('/{id}/status',              [AdminStoreController::class, 'updateStatus']);
+            Route::patch('/{id}/categories',          [AdminStoreController::class, 'updateCategories']);
+            Route::patch('/{id}/markets',             [AdminStoreController::class, 'updateMarkets']);
+            Route::patch('/{id}/languages',           [AdminStoreController::class, 'updateLanguages']);
+            Route::patch('/{id}/currencies',          [AdminStoreController::class, 'updateCurrencies']);
+            Route::patch('/{id}/payment-accounts',    [AdminStoreController::class, 'updatePaymentAccounts']);
+            Route::patch('/{id}/logistics',           [AdminStoreController::class, 'updateLogistics']);
+            Route::post('/{id}/domains',              [AdminStoreController::class, 'addDomain']);
+            Route::delete('/{id}/domains/{domainId}', [AdminStoreController::class, 'removeDomain']);
         });
 
         Route::prefix('settlements')->group(function () {
@@ -155,14 +178,57 @@ Route::prefix('api/v1/admin')
 
 /*
 |--------------------------------------------------------------------------
+| Merchant Routes — 公开注册
+|--------------------------------------------------------------------------
+*/
+
+use App\Http\Controllers\Merchant\RegisterController as MerchantRegisterController;
+
+// 商户公开注册（无需认证）
+Route::prefix('api/v1/merchant')
+    ->middleware(['force.json'])
+    ->group(function () {
+        Route::post('register', [MerchantRegisterController::class, 'register']);
+    });
+
+/*
+|--------------------------------------------------------------------------
 | Merchant Routes — 商户后台 API
 |--------------------------------------------------------------------------
 */
 
+use App\Http\Controllers\Merchant\AuthController as MerchantAuthController;
+use App\Http\Controllers\Merchant\ApiKeyController;
+use App\Http\Controllers\Merchant\UserController as MerchantUserController;
+use App\Http\Controllers\Merchant\DashboardController as MerchantDashboardController;
+use App\Http\Controllers\Merchant\OrderController as MerchantOrderController;
+
+// Merchant Auth (public — 无需认证)
+Route::prefix('api/v1/merchant/auth')->middleware(['force.json'])->group(function () {
+    Route::post('login', [MerchantAuthController::class, 'login']);
+});
+
+// Merchant protected routes
 Route::prefix('api/v1/merchant')
-    ->middleware(['auth:sanctum', 'force.json', 'central.only'])
+    ->middleware(['auth:merchant', 'force.json', 'central.only'])
     ->group(function () {
 
+        // Auth management
+        Route::post('auth/logout',  [MerchantAuthController::class, 'logout']);
+        Route::get('auth/me',      [MerchantAuthController::class, 'me']);
+        Route::post('auth/refresh', [MerchantAuthController::class, 'refresh']);
+
+        // User Management
+        Route::prefix('users')->group(function () {
+            Route::get('/',                   [MerchantUserController::class, 'index']);
+            Route::post('/',                  [MerchantUserController::class, 'store']);
+            Route::get('/{id}',               [MerchantUserController::class, 'show']);
+            Route::put('/{id}',               [MerchantUserController::class, 'update']);
+            Route::delete('/{id}',            [MerchantUserController::class, 'destroy']);
+            Route::patch('/{id}/password',    [MerchantUserController::class, 'changePassword']);
+            Route::patch('/{id}/permissions', [MerchantUserController::class, 'updatePermissions']);
+            Route::post('/{id}/unlock',       [MerchantUserController::class, 'unlock']);
+        });
         // Shop Management
         Route::prefix('shop')->group(function () {
             // TODO: MerchantShopController
@@ -173,14 +239,29 @@ Route::prefix('api/v1/merchant')
             // TODO: MerchantProductController
         });
 
+        // Dashboard
+        Route::get('dashboard', [MerchantDashboardController::class, 'index']);
+        Route::get('stores', [MerchantDashboardController::class, 'stores']);
+
         // Orders (read-only)
         Route::prefix('orders')->group(function () {
-            // TODO: MerchantOrderController
+            Route::get('/', [MerchantOrderController::class, 'index']);
+            Route::get('/{id}', [MerchantOrderController::class, 'show']);
         });
 
         // Settlements
         Route::prefix('settlements')->group(function () {
             // TODO: MerchantSettlementController
+        });
+
+        // API Keys (RSA 密钥管理)
+        Route::prefix('api-keys')->group(function () {
+            Route::get('/', [ApiKeyController::class, 'index']);
+            Route::post('/', [ApiKeyController::class, 'store']);
+            Route::post('/download', [ApiKeyController::class, 'download']);
+            Route::get('/{keyId}', [ApiKeyController::class, 'show']);
+            Route::post('/{keyId}/rotate', [ApiKeyController::class, 'rotate']);
+            Route::delete('/{keyId}', [ApiKeyController::class, 'revoke']);
         });
     });
 

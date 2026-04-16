@@ -6,57 +6,64 @@ use Illuminate\Database\Eloquent\Builder;
 use Illuminate\Database\Eloquent\Relations\BelongsTo;
 
 /**
- * 商户 API 密钥模型 — Central DB
+ * 商户 API 密钥模型 — Central DB（RSA 方案）
  *
- * 对应表：jh_merchant_api_keys（central 库）
- * 用于商户通过 API 接入平台时的身份验证（HMAC-SHA256 签名等）。
+ * 对应表：merchant_api_keys（central 库）
+ * 采用 RSA 非对称加密方案管理商户 API 密钥。
  *
  * @property int    $id
  * @property int    $merchant_id
  * @property int|null $store_id
- * @property string $name
- * @property string $api_key
- * @property string $api_secret
- * @property array|null  $permissions
- * @property int    $status
- * @property int    $rate_limit
+ * @property string $key_id          公开的密钥标识符
+ * @property string $public_key      RSA 公钥（PEM 格式）
+ * @property string $algorithm       签名算法，默认 RSA-SHA256
+ * @property int    $key_size        密钥长度，默认 4096
+ * @property string $status          active|rotating|revoked|expired
+ * @property \Carbon\Carbon|null $activated_at
  * @property \Carbon\Carbon|null $expires_at
- * @property \Carbon\Carbon|null $last_used_at
  * @property \Carbon\Carbon|null $revoked_at
+ * @property string|null $revoke_reason
+ * @property string|null $download_token
+ * @property \Carbon\Carbon|null $download_token_expires_at
+ * @property \Carbon\Carbon|null $downloaded_at
  * @property \Carbon\Carbon $created_at
  * @property \Carbon\Carbon $updated_at
  */
 class MerchantApiKey extends CentralModel
 {
-    protected $table = 'jh_merchant_api_keys';
+    protected $table = 'merchant_api_keys';
 
     protected $fillable = [
         'merchant_id',
         'store_id',
-        'name',
-        'api_key',
-        'api_secret',
-        'permissions',
+        'key_id',
+        'public_key',
+        'algorithm',
+        'key_size',
         'status',
-        'rate_limit',
+        'activated_at',
         'expires_at',
-        'last_used_at',
         'revoked_at',
+        'revoke_reason',
+        'download_token',
+        'download_token_expires_at',
+        'downloaded_at',
     ];
 
     protected $hidden = [
-        'api_secret',
+        'download_token',
     ];
 
     protected $casts = [
-        'merchant_id'  => 'integer',
-        'store_id'     => 'integer',
-        'permissions'  => 'array',
-        'status'       => 'integer',
-        'rate_limit'   => 'integer',
-        'expires_at'   => 'datetime',
-        'last_used_at' => 'datetime',
-        'revoked_at'   => 'datetime',
+        'merchant_id'               => 'integer',
+        'store_id'                  => 'integer',
+        'key_size'                  => 'integer',
+        'status'                    => 'string',
+        'activated_at'              => 'datetime',
+        'expires_at'                => 'datetime',
+        'revoked_at'                => 'datetime',
+        'download_token_expires_at' => 'datetime',
+        'downloaded_at'             => 'datetime',
     ];
 
     /* ----------------------------------------------------------------
@@ -78,16 +85,23 @@ class MerchantApiKey extends CentralModel
      | ---------------------------------------------------------------- */
 
     /**
-     * 只查询有效（启用且未过期未吊销）的密钥
+     * 只查询状态为 active 且未过期的密钥
      */
     public function scopeActive(Builder $query): Builder
     {
-        return $query->where('status', 1)
-            ->whereNull('revoked_at')
+        return $query->where('status', 'active')
             ->where(function (Builder $q) {
                 $q->whereNull('expires_at')
                   ->orWhere('expires_at', '>', now());
             });
+    }
+
+    /**
+     * 只查询状态为 rotating 的密钥
+     */
+    public function scopeRotating(Builder $query): Builder
+    {
+        return $query->where('status', 'rotating');
     }
 
     /* ----------------------------------------------------------------
@@ -96,16 +110,38 @@ class MerchantApiKey extends CentralModel
 
     public function isActive(): bool
     {
-        return $this->status === 1 && !$this->isExpired() && !$this->isRevoked();
+        return $this->status === 'active' && !$this->isExpired() && !$this->isRevoked();
+    }
+
+    public function isRotating(): bool
+    {
+        return $this->status === 'rotating';
     }
 
     public function isExpired(): bool
     {
-        return $this->expires_at !== null && $this->expires_at->isPast();
+        return $this->status === 'expired'
+            || ($this->expires_at !== null && $this->expires_at->isPast());
     }
 
     public function isRevoked(): bool
     {
-        return $this->revoked_at !== null;
+        return $this->status === 'revoked' || $this->revoked_at !== null;
+    }
+
+    public function isDownloaded(): bool
+    {
+        return $this->downloaded_at !== null;
+    }
+
+    /**
+     * 是否可以下载私钥（download_token 有效且未过期且未下载过）
+     */
+    public function canDownload(): bool
+    {
+        return $this->download_token !== null
+            && $this->download_token_expires_at !== null
+            && $this->download_token_expires_at->isFuture()
+            && $this->downloaded_at === null;
     }
 }

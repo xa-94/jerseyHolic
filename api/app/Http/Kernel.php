@@ -44,5 +44,6 @@ class Kernel extends HttpKernel
         'tenant'           => \App\Http\Middleware\ResolveTenantByDomain::class,
         'ensure.tenant'    => \App\Http\Middleware\EnsureTenantContext::class,
         'central.only'     => \App\Http\Middleware\PreventAccessFromTenantDomains::class,
+        'merchant.store'   => \App\Http\Middleware\MerchantStoreAccess::class,
     ];
 }

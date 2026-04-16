@@ -51,8 +51,10 @@ class Merchant extends CentralModel
         'status',
         'login_failures',
         'locked_until',
+        'fund_frozen_until',
         'last_login_at',
         'last_login_ip',
+        'approved_at',
     ];
 
     protected $hidden = [
@@ -67,7 +69,9 @@ class Merchant extends CentralModel
         'status'         => 'integer',
         'login_failures' => 'integer',
         'locked_until'   => 'datetime',
+        'fund_frozen_until' => 'datetime',
         'last_login_at'  => 'datetime',
+        'approved_at'    => 'datetime',
     ];
 
     /* ----------------------------------------------------------------
@@ -120,6 +124,14 @@ class Merchant extends CentralModel
     public function productSyncLogs(): HasMany
     {
         return $this->hasMany(ProductSyncLog::class, 'merchant_id');
+    }
+
+    /**
+     * 商户审核日志
+     */
+    public function auditLogs(): HasMany
+    {
+        return $this->hasMany(MerchantAuditLog::class, 'merchant_id')->latest();
     }
 
     /* ----------------------------------------------------------------
