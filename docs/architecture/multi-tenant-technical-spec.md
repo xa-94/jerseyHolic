@@ -1,8 +1,8 @@
 # JerseyHolic 多租户技术规范
 
-> **版本**: v3.1  
+> **版本**: v3.2  
 > **日期**: 2026-04-17  
-> **阶段**: Phase M1 + Phase M2 + Phase M3 (Implementation)  
+> **阶段**: Phase M1 + Phase M2 + Phase M3 + Phase M4 (Implementation)  
 > **包**: stancl/tenancy v3  
 > **框架**: Laravel 10  
 
@@ -35,6 +35,12 @@
    - 6.10 错误处理策略
    - 6.11 金额精度规范
    - 6.12 CodeReview 修复记录
+7. [Phase M4：商品多品类与同步引擎技术规范](#7-phase-m4商品多品类与同步引擎技术规范)
+   - 7.1 数据库架构扩展
+   - 7.2 配置规范
+   - 7.3 异步任务规范
+   - 7.4 缓存策略
+   - 7.5 API 路由概览
 
 ---
 
@@ -1732,3 +1738,466 @@ $commission = bcmul($orderTotalUsd, $finalRate, 2);
 | 1 | 配置键不一致 | `TransactionSimulationService` | 统一配置键命名规范，修复 config key 引用与实际定义不匹配问题 |
 | 2 | float→string 全链路 bcmath 修复 | `AccountLifecycleService` + `ElectionService` | 将所有 float 类型金额计算替换为 bcmath 字符串操作，消除浮点精度问题 |
 | 3 | PayPal Webhook storeId 提取 | `PayPalWebhookHandler` | 从 payload 的 `custom_id` 字段提取 storeId，而非从 URL 路径参数获取 |
+
+---
+
+## 7. Phase M4：商品多品类与同步引擎技术规范
+
+### 7.1 数据库架构扩展
+
+#### 7.1.1 Central DB 新增 5 张表
+
+| # | 表名 | 说明 | 迁移文件 |
+|---|------|------|----------|
+| 1 | `jh_product_categories_l1` | 一级品类（6 个） | `2026_04_17_200000_create_product_categories_l1_table` |
+| 2 | `jh_product_categories_l2` | 二级品类（15 个） | `2026_04_17_200100_create_product_categories_l2_table` |
+| 3 | `jh_category_safe_names` | 安全映射名称库 | `2026_04_17_200200_create_category_safe_names_table` |
+| 4 | `jh_sensitive_brands` | 敏感品牌黑名单 | `2026_04_17_200300_create_sensitive_brands_table` |
+| 5 | `jh_store_product_configs` | 站点商品配置 | `2026_04_17_200400_create_store_product_configs_table` |
+
+**product_categories_l1 表结构：**
+
+```sql
+CREATE TABLE `jh_product_categories_l1` (
+    `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `slug` VARCHAR(50) NOT NULL UNIQUE,
+    `names` JSON NOT NULL COMMENT '16语言翻译',
+    `is_sensitive` TINYINT(1) DEFAULT 0,
+    `sensitive_ratio` DECIMAL(5,2) DEFAULT 0.00,
+    `sort_order` INT DEFAULT 0,
+    `status` TINYINT DEFAULT 1,
+    `created_at` TIMESTAMP NULL,
+    `updated_at` TIMESTAMP NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+**product_categories_l2 表结构：**
+
+```sql
+CREATE TABLE `jh_product_categories_l2` (
+    `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `l1_id` BIGINT UNSIGNED NOT NULL,
+    `slug` VARCHAR(50) NOT NULL,
+    `names` JSON NOT NULL COMMENT '16语言翻译',
+    `is_sensitive` TINYINT(1) DEFAULT 0,
+    `sensitive_ratio` DECIMAL(5,2) DEFAULT 0.00,
+    `sort_order` INT DEFAULT 0,
+    `status` TINYINT DEFAULT 1,
+    `created_at` TIMESTAMP NULL,
+    `updated_at` TIMESTAMP NULL,
+    UNIQUE KEY `uk_l1_slug` (`l1_id`, `slug`),
+    FOREIGN KEY (`l1_id`) REFERENCES `jh_product_categories_l1`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+**category_safe_names 表结构：**
+
+```sql
+CREATE TABLE `jh_category_safe_names` (
+    `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `store_id` BIGINT UNSIGNED NULL COMMENT 'NULL=全局规则',
+    `l1_id` BIGINT UNSIGNED NULL,
+    `l2_id` BIGINT UNSIGNED NULL,
+    `sku` VARCHAR(100) NULL COMMENT '精确SKU匹配',
+    `sku_prefix` VARCHAR(50) NULL COMMENT 'SKU前缀匹配',
+    `safe_name` VARCHAR(255) NOT NULL,
+    `weight` INT DEFAULT 1 COMMENT '加权随机权重',
+    `status` TINYINT DEFAULT 1,
+    `created_at` TIMESTAMP NULL,
+    `updated_at` TIMESTAMP NULL,
+    INDEX `idx_store_sku` (`store_id`, `sku`),
+    INDEX `idx_store_prefix` (`store_id`, `sku_prefix`),
+    INDEX `idx_category` (`l1_id`, `l2_id`, `status`)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+**sensitive_brands 表结构：**
+
+```sql
+CREATE TABLE `jh_sensitive_brands` (
+    `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `brand_name` VARCHAR(100) NOT NULL UNIQUE,
+    `aliases` JSON NULL COMMENT '品牌别名列表',
+    `confidence` DECIMAL(3,2) DEFAULT 0.90,
+    `status` TINYINT DEFAULT 1,
+    `created_at` TIMESTAMP NULL,
+    `updated_at` TIMESTAMP NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+**store_product_configs 表结构：**
+
+```sql
+CREATE TABLE `jh_store_product_configs` (
+    `id` BIGINT UNSIGNED AUTO_INCREMENT PRIMARY KEY,
+    `store_id` BIGINT UNSIGNED NOT NULL UNIQUE,
+    `price_strategy` VARCHAR(20) DEFAULT 'multiplier',
+    `price_multiplier` DECIMAL(5,2) DEFAULT 1.00,
+    `markup_amount` DECIMAL(10,2) DEFAULT 0.00,
+    `safe_name_override` JSON NULL,
+    `default_language` VARCHAR(10) DEFAULT 'en',
+    `default_currency` VARCHAR(3) DEFAULT 'USD',
+    `auto_sync` TINYINT(1) DEFAULT 1,
+    `sync_fields` JSON NULL COMMENT '允许同步的字段列表',
+    `created_at` TIMESTAMP NULL,
+    `updated_at` TIMESTAMP NULL,
+    FOREIGN KEY (`store_id`) REFERENCES `jh_stores`(`id`) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+```
+
+#### 7.1.2 Merchant DB 新增 3 张表
+
+商户专属数据库 `jerseyholic_merchant_{id}` 中的三张表在商户审核通过时由 `MerchantDatabaseService::createMerchantDatabase()` 自动创建：
+
+| # | 表名 | 前缀 | 说明 |
+|---|------|------|------|
+| 1 | `master_products` | 无 | 商品主数据 |
+| 2 | `master_product_translations` | 无 | 商品多语言翻译 |
+| 3 | `sync_rules` | 无 | 商品同步规则 |
+
+> 注意：Merchant DB 不使用 `jh_` 表前缀，`merchant` 连接配置中 `prefix` 为空字符串。
+
+#### 7.1.3 Tenant DB 扩展
+
+Tenant DB 的 `jh_products` 表新增两个字段用于同步追踪：
+
+```sql
+ALTER TABLE `jh_products`
+    ADD COLUMN `sync_source_id` VARCHAR(255) NULL COMMENT '同步来源标识，格式: merchant_{id}_product_{master_id}' AFTER `status`,
+    ADD COLUMN `synced_at` TIMESTAMP NULL COMMENT '最近同步时间' AFTER `sync_source_id`,
+    ADD UNIQUE INDEX `uk_sync_source_id` (`sync_source_id`);
+```
+
+迁移文件：`database/migrations/tenant/000020_add_sync_fields_to_products_table`
+
+---
+
+### 7.2 配置规范
+
+#### 7.2.1 config/product-sync.php
+
+商品同步模块的统一配置文件，由 `ProductServiceProvider` 注册：
+
+```php
+return [
+    // 品类配置
+    'categories' => [
+        'supported_languages' => ['en','zh','de','fr','es','it','pt','nl','pl','sv','da','ar','tr','el','ja','ko'],
+    ],
+
+    // 安全映射配置
+    'safe_mapping' => [
+        'cache_ttl'        => 3600,       // 1h
+        'cache_prefix'     => 'cat_safe_name',
+        'default_weight'   => 1,
+    ],
+
+    // 特货识别配置
+    'sensitive' => [
+        'brands_cache_ttl'     => 1800,   // 30min
+        'brands_cache_key'     => 'sensitive_brands_list',
+        'default_confidence'   => 0.90,
+        'ratio_threshold'      => 0.50,   // 品类敏感度阈值
+        'mix_rules' => [
+            'BR-MIX-001' => ['min_ratio' => 0.80, 'strategy' => 'all_sensitive'],
+            'BR-MIX-002' => ['min_ratio' => 0.50, 'strategy' => 'split_order'],
+            'BR-MIX-003' => ['min_ratio' => 0.20, 'strategy' => 'desensitize'],
+            'BR-MIX-004' => ['min_ratio' => 0.00, 'strategy' => 'all_normal'],
+        ],
+    ],
+
+    // 同步引擎配置
+    'sync' => [
+        'queue'            => 'product-sync',
+        'tries'            => 3,
+        'backoff'          => [60, 120, 300],
+        'timeout'          => 120,
+        'batch_size'       => 50,          // 批量同步每批数量
+        'full_sync_chunk'  => 100,         // 全量同步分片大小
+    ],
+
+    // 斗篷配置
+    'cloak' => [
+        'default_mode'     => 'safe',
+        'header_name'      => 'X-Cloak-Mode',
+        'safe_image_path'  => '/images/placeholders/',
+        'filtered_attrs'   => ['brand', 'manufacturer', 'designer'],
+    ],
+
+    // 站点配置
+    'store_config' => [
+        'cache_ttl'        => 1800,       // 30min
+        'cache_prefix'     => 'store_product_config',
+        'default_strategy' => 'multiplier',
+        'default_multiplier' => 1.00,
+    ],
+];
+```
+
+#### 7.2.2 ProductServiceProvider
+
+**文件**: `api/app/Providers/ProductServiceProvider.php`
+
+```php
+class ProductServiceProvider extends ServiceProvider
+{
+    public function register(): void
+    {
+        $this->mergeConfigFrom(
+            __DIR__ . '/../../config/product-sync.php', 'product-sync'
+        );
+
+        $this->app->singleton(CategoryMappingService::class);
+        $this->app->singleton(SensitiveGoodsService::class);
+        $this->app->singleton(ProductSyncService::class);
+        $this->app->singleton(ProductDisplayService::class);
+        $this->app->singleton(StoreProductConfigService::class);
+    }
+
+    public function boot(): void
+    {
+        MasterProduct::observe(MasterProductObserver::class);
+    }
+}
+```
+
+在 `config/app.php` 的 `providers` 数组中注册：
+
+```php
+App\Providers\ProductServiceProvider::class,
+```
+
+---
+
+### 7.3 异步任务规范
+
+#### 7.3.1 SyncProductToStoreJob
+
+**文件**: `api/app/Jobs/SyncProductToStoreJob.php`
+
+```php
+class SyncProductToStoreJob implements ShouldQueue
+{
+    use Dispatchable, InteractsWithQueue, Queueable, SerializesModels;
+
+    public string $queue   = 'product-sync';
+    public int    $tries   = 3;
+    public array  $backoff = [60, 120, 300];
+    public int    $timeout = 120;
+
+    public function __construct(
+        public int $merchantId,
+        public int $masterProductId,
+        public int $storeId
+    ) {}
+
+    public function handle(
+        MerchantDatabaseService $dbService,
+        ProductSyncService $syncService
+    ): void {
+        // 1. 切换到 Merchant DB 获取主商品
+        // 2. 初始化租户上下文
+        // 3. 执行 syncToStore()
+    }
+}
+```
+
+#### 7.3.2 DailyProductSyncVerificationJob
+
+**文件**: `api/app/Jobs/DailyProductSyncVerificationJob.php`
+
+**执行时间：** 每日 03:00（Scheduler 配置）
+
+```php
+// app/Console/Kernel.php
+$schedule->job(new DailyProductSyncVerificationJob)
+    ->dailyAt('03:00')
+    ->onQueue('product-sync');
+```
+
+**校验流程：**
+
+```
+1. 遍历所有 active 商户
+2. 对每个商户，比对 Merchant DB 的 master_products 与各 Tenant DB 的 jh_products
+3. 检查 sync_source_id 一致性
+4. 检查 synced_at 时间是否滞后超过 24h
+5. 不一致的记录自动触发增量同步
+6. 记录校验日志到 jh_product_sync_logs
+```
+
+#### 7.3.3 MasterProductObserver
+
+**文件**: `api/app/Observers/MasterProductObserver.php`
+
+当 `MasterProduct` 的关键字段发生变更时，自动触发同步：
+
+```php
+class MasterProductObserver
+{
+    private const SYNC_TRIGGER_FIELDS = [
+        'name', 'description', 'price', 'cost', 'status',
+        'safe_name', 'safe_description', 'images', 'safe_images',
+    ];
+
+    public function updated(MasterProduct $product): void
+    {
+        if (!$product->isDirty(self::SYNC_TRIGGER_FIELDS)) {
+            return; // 非关键字段变更，不触发同步
+        }
+
+        // 查询商户的所有 auto_sync=1 的同步规则
+        $rules = SyncRule::where('auto_sync', 1)
+            ->where('status', 1)
+            ->get();
+
+        foreach ($rules as $rule) {
+            foreach ($rule->target_store_ids as $storeId) {
+                SyncProductToStoreJob::dispatch(
+                    $product->merchant_id,
+                    $product->id,
+                    $storeId
+                );
+            }
+        }
+    }
+}
+```
+
+---
+
+### 7.4 缓存策略
+
+| 缓存项 | 缓存 Key | TTL | 失效时机 |
+|---------|---------|-----|----------|
+| 安全映射名称 | `cat_safe_name:{store}:{sku}:{l1}:{l2}` | 1h | 管理员更新安全映射规则 |
+| 敏感品牌黑名单 | `sensitive_brands_list` | 30min | 管理员更新品牌黑名单 |
+| 站点商品配置 | `store_product_config:{storeId}` | 30min | 配置更新时主动清除 |
+| 品类列表 | `product_categories_l1_all` | 24h | 品类数据变更时清除 |
+| 品类列表 | `product_categories_l2:{l1_id}` | 24h | 品类数据变更时清除 |
+
+**缓存使用规范：**
+
+1. 安全映射缓存存储在 Central 缓存（不受租户前缀影响），使用 `Cache::store('redis')`
+2. 敏感品牌列表为全局数据，同样使用 Central 缓存
+3. 站点配置缓存包含 store_id，确保不同站点配置互不干扰
+4. 所有缓存在对应数据变更时通过 `Cache::forget()` 主动失效
+
+---
+
+### 7.5 API 路由概览
+
+#### 7.5.1 Admin 端路由（Central 路由）
+
+**品类管理（~8 条）：**
+
+| # | Method | URI | 说明 |
+|---|--------|-----|------|
+| 1 | GET | `/admin/categories/l1` | 一级品类列表 |
+| 2 | POST | `/admin/categories/l1` | 创建一级品类 |
+| 3 | PUT | `/admin/categories/l1/{id}` | 更新一级品类 |
+| 4 | DELETE | `/admin/categories/l1/{id}` | 删除一级品类 |
+| 5 | GET | `/admin/categories/l2` | 二级品类列表（支持 l1_id 过滤） |
+| 6 | POST | `/admin/categories/l2` | 创建二级品类 |
+| 7 | PUT | `/admin/categories/l2/{id}` | 更新二级品类 |
+| 8 | DELETE | `/admin/categories/l2/{id}` | 删除二级品类 |
+
+**安全映射管理（~5 条）：**
+
+| # | Method | URI | 说明 |
+|---|--------|-----|------|
+| 1 | GET | `/admin/safe-names` | 安全映射列表（支持站点/品类过滤） |
+| 2 | POST | `/admin/safe-names` | 创建安全映射 |
+| 3 | PUT | `/admin/safe-names/{id}` | 更新安全映射 |
+| 4 | DELETE | `/admin/safe-names/{id}` | 删除安全映射 |
+| 5 | POST | `/admin/safe-names/batch` | 批量创建/更新 |
+
+**敏感品牌管理（~4 条）：**
+
+| # | Method | URI | 说明 |
+|---|--------|-----|------|
+| 1 | GET | `/admin/sensitive-brands` | 敏感品牌列表 |
+| 2 | POST | `/admin/sensitive-brands` | 添加敏感品牌 |
+| 3 | PUT | `/admin/sensitive-brands/{id}` | 更新敏感品牌 |
+| 4 | DELETE | `/admin/sensitive-brands/{id}` | 删除敏感品牌 |
+
+**同步监控（~3 条）：**
+
+| # | Method | URI | 说明 |
+|---|--------|-----|------|
+| 1 | GET | `/admin/sync/logs` | 同步日志列表（支持商户/店铺/状态过滤） |
+| 2 | GET | `/admin/sync/stats` | 同步统计概览 |
+| 3 | POST | `/admin/sync/verify` | 手动触发同步校验 |
+
+#### 7.5.2 Merchant 端路由（Central 路由）
+
+**主商品管理（~8 条）：**
+
+| # | Method | URI | 说明 |
+|---|--------|-----|------|
+| 1 | GET | `/merchant/products` | 主商品列表 |
+| 2 | POST | `/merchant/products` | 创建主商品 |
+| 3 | GET | `/merchant/products/{id}` | 主商品详情 |
+| 4 | PUT | `/merchant/products/{id}` | 更新主商品 |
+| 5 | DELETE | `/merchant/products/{id}` | 删除主商品 |
+| 6 | POST | `/merchant/products/{id}/translations` | 添加/更新翻译 |
+| 7 | GET | `/merchant/products/{id}/translations` | 获取翻译列表 |
+| 8 | POST | `/merchant/products/batch` | 批量操作（创建/更新/删除） |
+
+**同步规则管理（~5 条）：**
+
+| # | Method | URI | 说明 |
+|---|--------|-----|------|
+| 1 | GET | `/merchant/sync-rules` | 同步规则列表 |
+| 2 | POST | `/merchant/sync-rules` | 创建同步规则 |
+| 3 | PUT | `/merchant/sync-rules/{id}` | 更新同步规则 |
+| 4 | DELETE | `/merchant/sync-rules/{id}` | 删除同步规则 |
+| 5 | PUT | `/merchant/sync-rules/{id}/toggle` | 启用/禁用同步规则 |
+
+**同步触发与日志（~5 条）：**
+
+| # | Method | URI | 说明 |
+|---|--------|-----|------|
+| 1 | POST | `/merchant/sync/trigger` | 手动触发同步（单商品/批量/全量） |
+| 2 | POST | `/merchant/sync/incremental` | 触发增量同步 |
+| 3 | GET | `/merchant/sync/logs` | 同步日志列表 |
+| 4 | GET | `/merchant/sync/logs/{id}` | 同步日志详情 |
+| 5 | GET | `/merchant/sync/status` | 同步状态概览 |
+
+**站点配置管理（~4 条）：**
+
+| # | Method | URI | 说明 |
+|---|--------|-----|------|
+| 1 | GET | `/merchant/stores/{store}/product-config` | 获取站点商品配置 |
+| 2 | PUT | `/merchant/stores/{store}/product-config` | 更新站点商品配置 |
+| 3 | GET | `/merchant/stores/{store}/synced-products` | 获取站点已同步商品列表 |
+| 4 | DELETE | `/merchant/stores/{store}/synced-products/{productId}` | 移除已同步商品 |
+
+---
+
+### 附录（Phase M4）：文件索引
+
+| 类别 | 文件路径 |
+|------|--------|
+| 商品同步配置 | `api/config/product-sync.php` |
+| ProductServiceProvider | `api/app/Providers/ProductServiceProvider.php` |
+| ProductCategoryL1 | `api/app/Models/Central/ProductCategoryL1.php` |
+| ProductCategoryL2 | `api/app/Models/Central/ProductCategoryL2.php` |
+| CategorySafeName | `api/app/Models/Central/CategorySafeName.php` |
+| SensitiveBrand | `api/app/Models/Central/SensitiveBrand.php` |
+| StoreProductConfig | `api/app/Models/Central/StoreProductConfig.php` |
+| MerchantModel 基类 | `api/app/Models/Merchant/MerchantModel.php` |
+| MasterProduct | `api/app/Models/Merchant/MasterProduct.php` |
+| MasterProductTranslation | `api/app/Models/Merchant/MasterProductTranslation.php` |
+| SyncRule | `api/app/Models/Merchant/SyncRule.php` |
+| CategoryMappingService | `api/app/Services/Product/CategoryMappingService.php` |
+| SensitiveGoodsService | `api/app/Services/Product/SensitiveGoodsService.php` |
+| ProductSyncService | `api/app/Services/Product/ProductSyncService.php` |
+| ProductDisplayService | `api/app/Services/Product/ProductDisplayService.php` |
+| StoreProductConfigService | `api/app/Services/Product/StoreProductConfigService.php` |
+| CloakContentFilter | `api/app/Http/Middleware/CloakContentFilter.php` |
+| SyncProductToStoreJob | `api/app/Jobs/SyncProductToStoreJob.php` |
+| DailyProductSyncVerificationJob | `api/app/Jobs/DailyProductSyncVerificationJob.php` |
+| MasterProductObserver | `api/app/Observers/MasterProductObserver.php` |
+| Central DB 迁移（M4） | `api/database/migrations/central/2026_04_17_2000*.php` |
+| Tenant DB 迁移（M4） | `api/database/migrations/tenant/000020_*.php` |

@@ -1,8 +1,8 @@
 # JerseyHolic 多租户架构实现文档
 
-> **版本**: v3.1  
+> **版本**: v3.2  
 > **日期**: 2026-04-17  
-> **里程碑**: Phase M1 + Phase M2 + Phase M3 (Implementation)  
+> **里程碑**: Phase M1 + Phase M2 + Phase M3 + Phase M4 (Implementation)  
 > **核心依赖**: stancl/tenancy ^3.8
 
 ---
@@ -18,6 +18,7 @@
 7. [Phase M2 商户管理核心架构](#phase-m2-商户管理核心架构)
 8. [Phase M3 支付与结算架构](#phase-m3-支付与结算架构)
 9. [Phase M3 支付与结算实现详情](#phase-m3-支付与结算实现详情)
+10. [Phase M4 商品多品类与同步引擎](#phase-m4-商品多品类与同步引擎)
 
 ---
 
@@ -1478,4 +1479,399 @@ foreach ($merchant->stores()->where('status', 1)->get() as $store) {
 | 中间件 | 3 | `VerifyMerchantSignature`、`VerifyPayPalWebhook`、`VerifyStripeWebhook` |
 | 数据库迁移 | 8 | Central DB 支付相关表（payment_accounts、settlement_records 等）|
 | 测试文件 | 12 | 92 个测试用例，覆盖选号、佣金计算、Webhook、签名验证等 |
+
+---
+
+## Phase M4 商品多品类与同步引擎
+
+> **版本**: v3.2  
+> **日期**: 2026-04-17  
+> **里程碑**: Phase M4 — 商品多品类与同步引擎
+
+---
+
+### 1. 品类体系架构
+
+系统采用 **两级品类体系**，存储在 Central DB 中，作为全平台统一品类标准：
+
+```mermaid
+graph TB
+    L1[product_categories_l1<br/>6 个一级品类] --> L2[product_categories_l2<br/>15 个二级品类]
+    L1 --> Sensitive[特货判定<br/>is_sensitive + sensitive_ratio]
+    L2 --> SafeName[category_safe_names<br/>安全映射名称库]
+```
+
+**一级品类表 `jh_product_categories_l1`（Central DB）：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | BIGINT UNSIGNED PK | 自增主键 |
+| `slug` | VARCHAR(50) UNIQUE | 品类标识符（如 jerseys, shoes, accessories） |
+| `names` | JSON | 16 语言翻译（EN/ZH/DE/FR/ES/IT/PT/NL/PL/SV/DA/AR/TR/EL/JA/KO） |
+| `is_sensitive` | TINYINT(1) DEFAULT 0 | 是否为特货品类 |
+| `sensitive_ratio` | DECIMAL(5,2) DEFAULT 0.00 | 品类敏感度比例（0.00~1.00） |
+| `sort_order` | INT DEFAULT 0 | 排序权重 |
+| `status` | TINYINT DEFAULT 1 | 0=disabled, 1=enabled |
+| `created_at` / `updated_at` | TIMESTAMP | 时间戳 |
+
+**二级品类表 `jh_product_categories_l2`（Central DB）：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | BIGINT UNSIGNED PK | 自增主键 |
+| `l1_id` | BIGINT UNSIGNED | 关联一级品类 |
+| `slug` | VARCHAR(50) | 品类标识符 |
+| `names` | JSON | 16 语言翻译 |
+| `is_sensitive` | TINYINT(1) DEFAULT 0 | 是否为特货品类 |
+| `sensitive_ratio` | DECIMAL(5,2) DEFAULT 0.00 | 品类敏感度比例 |
+| `sort_order` | INT DEFAULT 0 | 排序权重 |
+| `status` | TINYINT DEFAULT 1 | 0=disabled, 1=enabled |
+| `created_at` / `updated_at` | TIMESTAMP | 时间戳 |
+
+**多语言 JSON 字段结构示例：**
+
+```json
+{
+  "en": "Jerseys",
+  "zh": "球衣",
+  "de": "Trikots",
+  "fr": "Maillots",
+  "es": "Camisetas",
+  "it": "Maglie",
+  "pt": "Camisas",
+  "nl": "Shirts",
+  "pl": "Koszulki",
+  "sv": "Tröjor",
+  "da": "Trøjer",
+  "ar": "قمصان",
+  "tr": "Formalar",
+  "el": "Φανέλες",
+  "ja": "ユニフォーム",
+  "ko": "یونیفرم"
+}
+```
+
+---
+
+### 2. Merchant DB 独立数据库
+
+每个商户拥有独立的商户数据库（`jerseyholic_merchant_{id}`），用于存储商品主数据、翻译和同步规则。
+
+**数据库连接配置（`config/database.php`）：**
+
+```php
+'merchant' => [
+    'driver'   => 'mysql',
+    'database' => null,  // 由 MerchantDatabaseService 动态设置
+    'prefix'   => '',    // Merchant DB 无表前缀
+    // ...其他配置同 central
+],
+```
+
+**MerchantModel 基类：**
+
+```php
+abstract class MerchantModel extends Model
+{
+    protected $connection = 'merchant';
+}
+```
+
+所有商户库模型（`MasterProduct`, `MasterProductTranslation`, `SyncRule`）继承此基类，强制使用 `merchant` 连接。
+
+**MerchantDatabaseService::run() 动态切换：**
+
+```php
+public function run(Merchant $merchant, Closure $callback): mixed
+{
+    $dbName = $this->getDatabaseName($merchant);
+    config(['database.connections.merchant.database' => $dbName]);
+    DB::purge('merchant');
+
+    try {
+        return $callback();
+    } finally {
+        DB::purge('merchant');
+    }
+}
+```
+
+通过 `run()` 方法，可在任何上下文中动态切换到指定商户的数据库执行操作，完成后自动释放连接。
+
+**Merchant DB 三张表：**
+
+| # | 表名 | 说明 |
+|---|------|------|
+| 1 | `master_products` | 商品主数据（SKU/名称/品牌/价格/安全名称等） |
+| 2 | `master_product_translations` | 商品多语言翻译（product_id + locale 唯一键） |
+| 3 | `sync_rules` | 同步规则配置（目标店铺/同步字段/自动同步开关） |
+
+---
+
+### 3. 安全映射名称库（5 级优先级）
+
+`CategoryMappingService` 实现 5 级优先级的安全名称解析链，确保商品在“安全模式”下展示时使用合规的名称：
+
+```mermaid
+graph TB
+    Input[SKU + 品类 + 站点] --> P1{优先级1<br/>站点覆盖}
+    P1 -->|命中| Result[返回安全名称]
+    P1 -->|未命中| P2{优先级2<br/>精确SKU匹配}
+    P2 -->|命中| Result
+    P2 -->|未命中| P3{优先级3<br/>SKU前缀匹配}
+    P3 -->|命中| Result
+    P3 -->|未命中| P4{优先级4<br/>品类级映射}
+    P4 -->|命中| Result
+    P4 -->|未命中| P5{优先级5<br/>兆底默认}
+    P5 --> Result
+```
+
+**5 级优先级详解：**
+
+| 优先级 | 映射维度 | 匹配条件 | 说明 |
+|--------|---------|---------|------|
+| 1（最高） | 站点覆盖 | `store_id + sku` 或 `store_id + category` | 站点级自定义安全名称 |
+| 2 | 精确 SKU | `sku` 完全匹配 | 按 SKU 精确映射 |
+| 3 | SKU 前缀 | `sku_prefix` 前缀匹配 | 按 SKU 前缀批量映射 |
+| 4 | 品类级 | `l1_id + l2_id` 品类匹配 | 按品类统一映射 |
+| 5（兆底） | 默认 | 无条件 | 平台级默认安全名称 |
+
+**安全名称表 `jh_category_safe_names`（Central DB）：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | BIGINT UNSIGNED PK | 自增主键 |
+| `store_id` | BIGINT UNSIGNED NULL | 站点 ID，NULL 表示全局规则 |
+| `l1_id` | BIGINT UNSIGNED NULL | 一级品类 ID |
+| `l2_id` | BIGINT UNSIGNED NULL | 二级品类 ID |
+| `sku` | VARCHAR(100) NULL | 精确 SKU 匹配 |
+| `sku_prefix` | VARCHAR(50) NULL | SKU 前缀匹配 |
+| `safe_name` | VARCHAR(255) | 安全商品名称 |
+| `weight` | INT DEFAULT 1 | 加权随机选取权重 |
+| `status` | TINYINT DEFAULT 1 | 0=disabled, 1=enabled |
+| `created_at` / `updated_at` | TIMESTAMP | 时间戳 |
+
+**加权随机选取：** 同一优先级层级可能存在多条匹配记录，通过 `weight` 字段加权随机选取其中一条，避免固定模式被检测。
+
+**缓存策略：**
+- 缓存 Key：`cat_safe_name:{store}:{sku}:{l1}:{l2}`
+- TTL：1 小时
+- 失效：管理员更新安全映射规则时主动清除
+
+---
+
+### 4. 特货自动识别引擎
+
+`SensitiveGoodsService` 实现三级判定机制，自动识别商品是否为特货：
+
+```mermaid
+graph TB
+    Product[SKU + 品牌 + 品类] --> L1{级别1<br/>SKU前缀匹配}
+    L1 -->|命中| R1[特货 100%置信度]
+    L1 -->|未命中| L2{级别2<br/>品牌黑名单}
+    L2 -->|命中| R2[特货 90%置信度]
+    L2 -->|未命中| L3{级别3<br/>品类敏感度}
+    L3 -->|sensitive_ratio > 0.5| R3[特货]
+    L3 -->|sensitive_ratio ≤ 0.5| R4[普货]
+```
+
+**三级判定规则：**
+
+| 级别 | 判定方式 | 置信度 | 数据源 |
+|------|---------|---------|-------|
+| 1 | SKU 前缀匹配（如 `NK-`, `AD-`） | 100% | `sku_prefix_configs` 配置 |
+| 2 | 品牌黑名单匹配 | 90% | `jh_sensitive_brands` 表 |
+| 3 | 品类敏感度比例 | 按 ratio 计算 | `product_categories_l1/l2.sensitive_ratio` |
+
+**敏感品牌表 `jh_sensitive_brands`（Central DB）：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | BIGINT UNSIGNED PK | 自增主键 |
+| `brand_name` | VARCHAR(100) UNIQUE | 品牌名称 |
+| `aliases` | JSON | 品牌别名列表 |
+| `confidence` | DECIMAL(3,2) DEFAULT 0.90 | 判定置信度 |
+| `status` | TINYINT DEFAULT 1 | 0=disabled, 1=enabled |
+| `created_at` / `updated_at` | TIMESTAMP | 时间戳 |
+
+**缓存策略：**
+- 缓存 Key：`sensitive_brands_list`
+- TTL：30 分钟
+- 失效：管理员更新品牌黑名单时主动清除
+
+**混合订单策略：**
+
+当订单中同时包含特货和普货时，按以下规则处理：
+
+| 规则编号 | 条件 | 处理方式 |
+|---------|------|----------|
+| BR-MIX-001 | 特货占比 > 80% | 整单按特货处理 |
+| BR-MIX-002 | 特货占比 50%~80% | 拆单处理，分别走特货/普货通道 |
+| BR-MIX-003 | 特货占比 20%~50% | 整单按普货处理，特货商品脱敏 |
+| BR-MIX-004 | 特货占比 < 20% | 整单按普货处理 |
+
+---
+
+### 5. 商品同步引擎
+
+`ProductSyncService` 实现商户主商品库到各租户店铺的商品同步：
+
+```mermaid
+graph TB
+    MerchantDB[Merchant DB<br/>master_products] --> SyncService[ProductSyncService]
+    SyncService --> SyncToStore[syncToStore<br/>单店同步]
+    SyncService --> BatchSync[batchSync<br/>批量同步]
+    SyncService --> FullSync[fullSync<br/>全量同步]
+    SyncService --> IncrSync[incrementalSync<br/>增量同步]
+    SyncToStore --> TenantDB[Tenant DB<br/>jh_products]
+    BatchSync --> Job[SyncProductToStoreJob<br/>queue=product-sync]
+    FullSync --> Job
+    IncrSync --> Job
+```
+
+**核心方法：**
+
+| 方法 | 说明 |
+|------|------|
+| `syncToStore(MasterProduct, Store)` | 同步单个商品到指定店铺，支持创建/更新 |
+| `batchSync(array $productIds, Store)` | 批量同步多个商品到指定店铺 |
+| `fullSync(Merchant, Store)` | 全量同步商户所有 active 商品到店铺 |
+| `incrementalSync(Merchant, Store, Carbon $since)` | 增量同步指定时间后变更的商品 |
+
+**幂等性保障：**
+
+Tenant DB 的 `jh_products` 表新增 `sync_source_id` 和 `synced_at` 字段：
+
+```php
+// 通过 sync_source_id 实现幂等同步
+$product = Product::updateOrCreate(
+    ['sync_source_id' => "merchant_{$merchantId}_product_{$masterProduct->id}"],
+    [
+        'name'        => $masterProduct->name,
+        'price'       => $syncedPrice,
+        'synced_at'   => now(),
+        // ...其他字段
+    ]
+);
+```
+
+**异步 Job 配置：**
+
+```php
+class SyncProductToStoreJob implements ShouldQueue
+{
+    public string $queue   = 'product-sync';     // 专用队列
+    public int    $tries   = 3;                  // 最多重试 3 次
+    public array  $backoff = [60, 120, 300];      // 递增重试间隔（1min → 2min → 5min）
+    public int    $timeout = 120;                // 单次超时 2 分钟
+}
+```
+
+**价格策略：**
+
+同步时支持三种价格计算策略（使用 `bcmath` 保证精度）：
+
+| 策略 | 公式 | 示例 |
+|------|------|------|
+| `multiplier` | `master_price × multiplier` | 原价 $50 × 1.2 = $60 |
+| `fixed` | 固定价格 | 直接设置 $69.99 |
+| `markup` | `master_price + markup_amount` | 原价 $50 + $15 = $65 |
+
+---
+
+### 6. 斗篷系统应用层
+
+Phase M4 将斗篷（Cloak）机制应用于商品展示层，实现安全/真实双模式切换：
+
+```mermaid
+graph TB
+    Request[HTTP Request] --> CloakMW[CloakContentFilter 中间件]
+    CloakMW --> CheckHeader{X-Cloak-Mode<br/>请求头检测}
+    CheckHeader -->|safe 或未设置| SafeMode[安全模式]
+    CheckHeader -->|real| RealMode[真实模式]
+    SafeMode --> ProductDisplay[ProductDisplayService]
+    RealMode --> ProductDisplay
+    ProductDisplay -->|safe| SafeOutput[安全名称替换<br/>占位图替换<br/>品牌属性过滤]
+    ProductDisplay -->|real| RealOutput[真实商品信息<br/>原始图片和属性]
+```
+
+**CloakContentFilter 中间件：**
+
+| 功能 | 说明 |
+|------|------|
+| `X-Cloak-Mode: safe` | 触发安全模式，商品信息脱敏后返回 |
+| `X-Cloak-Mode: real` | 真实模式，返回原始商品信息 |
+| 无请求头 | 默认为 safe 模式 |
+
+**ProductDisplayService 安全模式处理：**
+
+1. **安全名称替换** — 调用 `CategoryMappingService` 获取安全名称替换原始商品名
+2. **占位图替换** — 将原始商品图片替换为安全占位图（`safe_images`）
+3. **品牌属性过滤** — 移除商品属性中的品牌相关信息（brand, manufacturer 等）
+
+---
+
+### 7. 站点级差异化配置
+
+`StoreProductConfigService` 提供站点级的商品配置覆盖能力，存储在 Central DB 的 `jh_store_product_configs` 表中：
+
+**站点商品配置表 `jh_store_product_configs`（Central DB）：**
+
+| 字段 | 类型 | 说明 |
+|------|------|------|
+| `id` | BIGINT UNSIGNED PK | 自增主键 |
+| `store_id` | BIGINT UNSIGNED UNIQUE | 站点 ID |
+| `price_strategy` | VARCHAR(20) DEFAULT 'multiplier' | 价格策略（multiplier/fixed/markup） |
+| `price_multiplier` | DECIMAL(5,2) DEFAULT 1.00 | 价格乘数 |
+| `markup_amount` | DECIMAL(10,2) DEFAULT 0.00 | 加价金额 |
+| `safe_name_override` | JSON NULL | 站点级安全名称覆盖 |
+| `default_language` | VARCHAR(10) DEFAULT 'en' | 默认语言 |
+| `default_currency` | VARCHAR(3) DEFAULT 'USD' | 默认货币 |
+| `auto_sync` | TINYINT(1) DEFAULT 1 | 是否自动同步 |
+| `sync_fields` | JSON | 允许同步的字段列表 |
+| `created_at` / `updated_at` | TIMESTAMP | 时间戳 |
+
+**StoreProductConfigService 核心能力：**
+
+| 方法 | 说明 |
+|------|------|
+| `getConfig(Store)` | 获取站点商品配置（带缓存） |
+| `updateConfig(Store, array)` | 更新站点配置（清除缓存） |
+| `getPriceForStore(Store, MasterProduct)` | 根据站点价格策略计算最终价格 |
+| `getSafeNameForStore(Store, Product)` | 获取站点级安全名称覆盖 |
+
+**缓存策略：**
+- 缓存 Key：`store_product_config:{storeId}`
+- TTL：30 分钟
+- 失效：配置更新时主动清除
+
+---
+
+### 附录（Phase M4）：关键文件索引
+
+| 文件 | 说明 |
+|------|------|
+| `config/database.php` | 新增 merchant 连接配置 |
+| `config/product-sync.php` | 商品同步统一配置（品类/安全映射/特货/同步/斗篷/站点配置） |
+| `app/Providers/ProductServiceProvider.php` | 商品模块服务注册 |
+| `app/Models/Central/ProductCategoryL1.php` | 一级品类模型 |
+| `app/Models/Central/ProductCategoryL2.php` | 二级品类模型 |
+| `app/Models/Central/CategorySafeName.php` | 安全映射名称模型 |
+| `app/Models/Central/SensitiveBrand.php` | 敏感品牌模型 |
+| `app/Models/Central/StoreProductConfig.php` | 站点商品配置模型 |
+| `app/Models/Merchant/MerchantModel.php` | Merchant DB 模型基类 |
+| `app/Models/Merchant/MasterProduct.php` | 主商品模型 |
+| `app/Models/Merchant/MasterProductTranslation.php` | 商品翻译模型 |
+| `app/Models/Merchant/SyncRule.php` | 同步规则模型 |
+| `app/Services/Product/CategoryMappingService.php` | 5 级安全映射解析服务 |
+| `app/Services/Product/SensitiveGoodsService.php` | 特货自动识别引擎 |
+| `app/Services/Product/ProductSyncService.php` | 商品同步服务 |
+| `app/Services/Product/ProductDisplayService.php` | 斗篷双模式展示服务 |
+| `app/Services/Product/StoreProductConfigService.php` | 站点商品配置服务 |
+| `app/Http/Middleware/CloakContentFilter.php` | 斗篷内容过滤中间件 |
+| `app/Jobs/SyncProductToStoreJob.php` | 商品同步异步 Job |
+| `app/Jobs/DailyProductSyncVerificationJob.php` | 每日同步校验 Job |
+| `app/Observers/MasterProductObserver.php` | 主商品变更自动触发同步 |
+| `database/migrations/central/` | M4 Central DB 迁移（5 张新表） |
+| `database/migrations/tenant/` | M4 Tenant DB 迁移（products 表扩展） |
 
