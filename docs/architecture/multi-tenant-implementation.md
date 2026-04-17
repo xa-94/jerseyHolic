@@ -1,8 +1,8 @@
 # JerseyHolic 多租户架构实现文档
 
-> **版本**: v3.2  
+> **版本**: v3.3  
 > **日期**: 2026-04-17  
-> **里程碑**: Phase M1 + Phase M2 + Phase M3 + Phase M4 (Implementation)  
+> **里程碑**: Phase M1 + Phase M2 + Phase M3 + Phase M4 + Phase M5 (Implementation)  
 > **核心依赖**: stancl/tenancy ^3.8
 
 ---
@@ -19,6 +19,7 @@
 8. [Phase M3 支付与结算架构](#phase-m3-支付与结算架构)
 9. [Phase M3 支付与结算实现详情](#phase-m3-支付与结算实现详情)
 10. [Phase M4 商品多品类与同步引擎](#phase-m4-商品多品类与同步引擎)
+11. [Phase M5 商户后台与前端架构](#phase-m5-商户后台与前端架构)
 
 ---
 
@@ -1875,3 +1876,409 @@ graph TB
 | `database/migrations/central/` | M4 Central DB 迁移（5 张新表） |
 | `database/migrations/tenant/` | M4 Tenant DB 迁移（products 表扩展） |
 
+---
+
+## Phase M5 商户后台与前端架构
+
+> **版本**: v3.3  
+> **日期**: 2026-04-17  
+> **里程碑**: Phase M5 — 商户后台与前端架构
+
+---
+
+### 1. merchant-ui 项目架构（Vue 3 + Element Plus + Vite）
+
+`merchant-ui/` 是独立的商户后台前端应用，采用现代前端技术栈构建，为商户提供完整的后台管理界面。
+
+**技术栈：**
+
+| 技术 | 版本 | 用途 |
+|------|------|------|
+| Vue 3 | ^3.x | 核心框架（Composition API） |
+| TypeScript | ^5.x | 类型安全 |
+| Element Plus | ^2.x | UI 组件库 |
+| Vite | ^5.x | 构建工具 |
+| Vue Router 4 | ^4.x | 前端路由 + 路由守卫 |
+| Pinia | ^2.x | 状态管理 |
+| ECharts | ^5.x | 数据可视化（仪表盘图表） |
+| Axios | ^1.x | HTTP 请求封装 |
+
+**项目结构：**
+
+```
+merchant-ui/
+├── src/
+│   ├── api/            # API 请求封装（按模块分文件）
+│   ├── assets/         # 静态资源
+│   ├── components/     # 通用组件（StoreSwitcher/DataCard等）
+│   ├── composables/    # 组合式函数（useAuth/useCurrency）
+│   ├── layouts/        # 布局组件（DefaultLayout/AuthLayout）
+│   ├── pages/          # 页面组件
+│   │   ├── LoginView.vue
+│   │   ├── DashboardView.vue
+│   │   ├── StoreListView.vue
+│   │   ├── ProductListView.vue
+│   │   ├── SyncLogView.vue
+│   │   ├── OrderListView.vue
+│   │   ├── SettlementView.vue
+│   │   └── UserManageView.vue
+│   ├── stores/         # Pinia 状态（authStore/storeStore/userStore）
+│   ├── router/         # Vue Router 配置 + 路由守卫
+│   └── types/          # TypeScript 类型定义
+├── vite.config.ts
+├── tsconfig.json
+└── tsconfig.node.json
+```
+
+**路由守卫（merchant guard）：**
+
+```typescript
+// router/index.ts — beforeEach 路由守卫
+router.beforeEach(async (to) => {
+  const authStore = useAuthStore();
+
+  if (to.meta.requiresAuth && !authStore.isLoggedIn) {
+    return { name: 'login', query: { redirect: to.fullPath } };
+  }
+
+  if (to.name === 'login' && authStore.isLoggedIn) {
+    return { name: 'dashboard' };
+  }
+});
+```
+
+**Axios 请求封装：**
+
+```typescript
+// api/http.ts — Axios 实例配置
+const http = axios.create({
+  baseURL: import.meta.env.VITE_API_BASE_URL,
+  timeout: 15000,
+});
+
+// 请求拦截：自动附加 Bearer Token
+http.interceptors.request.use((config) => {
+  const token = localStorage.getItem('merchant_token');
+  if (token) config.headers.Authorization = `Bearer ${token}`;
+  return config;
+});
+
+// 响应拦截：401 自动跳转登录页
+http.interceptors.response.use(
+  (res) => res.data,
+  (err) => {
+    if (err.response?.status === 401) {
+      router.push({ name: 'login' });
+    }
+    return Promise.reject(err);
+  }
+);
+```
+
+---
+
+### 2. Storefront 多租户适配（Nuxt 3）
+
+Storefront 基于 Nuxt 3 构建，需要根据请求域名动态加载站点配置，实现多租户差异化呈现。
+
+#### 2.1 tenant.client.ts Plugin
+
+文件：`storefront/plugins/tenant.client.ts`
+
+这是多租户适配的核心插件，在客户端启动时执行，负责从 API 获取当前域名对应的站点配置并注入全局上下文：
+
+```typescript
+// plugins/tenant.client.ts
+export default defineNuxtPlugin(async () => {
+  const tenantStore = useTenantStore();
+  const host = window.location.hostname;
+
+  if (!tenantStore.config) {
+    await tenantStore.fetchConfig(host);
+  }
+
+  // 注入站点主题 CSS 变量
+  if (tenantStore.config?.theme) {
+    applyThemeVariables(tenantStore.config.theme);
+  }
+
+  // 启用 RTL（阿拉伯语等）
+  if (tenantStore.config?.rtl) {
+    document.documentElement.setAttribute('dir', 'rtl');
+  }
+});
+```
+
+#### 2.2 useTenant Composable
+
+文件：`storefront/composables/useTenant.ts`
+
+```typescript
+export function useTenant() {
+  const tenantStore = useTenantStore();
+
+  return {
+    storeId:       computed(() => tenantStore.config?.id),
+    storeName:     computed(() => tenantStore.config?.name),
+    languages:     computed(() => tenantStore.config?.languages ?? ['en']),
+    currencies:    computed(() => tenantStore.config?.currencies ?? ['USD']),
+    defaultLang:   computed(() => tenantStore.config?.default_language ?? 'en'),
+    defaultCurrency: computed(() => tenantStore.config?.default_currency ?? 'USD'),
+    theme:         computed(() => tenantStore.config?.theme),
+    isRtl:         computed(() => tenantStore.config?.rtl ?? false),
+  };
+}
+```
+
+#### 2.3 tenantStore（Pinia）
+
+文件：`storefront/stores/tenant.ts`
+
+```typescript
+export const useTenantStore = defineStore('tenant', () => {
+  const config = ref<StoreConfig | null>(null);
+
+  async function fetchConfig(host: string) {
+    const data = await $fetch<StoreConfig>('/api/storefront/config', {
+      headers: { 'X-Store-Host': host },
+    });
+    config.value = data;
+  }
+
+  return { config, fetchConfig };
+});
+```
+
+**StoreConfig 类型定义：**
+
+```typescript
+interface StoreConfig {
+  id:               number;
+  name:             string;
+  domain:           string;
+  languages:        string[];  // ['en', 'de', 'fr']
+  currencies:       string[];  // ['USD', 'EUR', 'GBP']
+  default_language: string;
+  default_currency: string;
+  theme: {
+    primary_color:    string;
+    secondary_color:  string;
+    logo_url:         string;
+    favicon_url:      string;
+  };
+  rtl: boolean;
+}
+```
+
+#### 2.4 tenant middleware
+
+文件：`storefront/middleware/tenant.ts`
+
+在每次路由导航前确认站点配置已加载，若未加载则等待 Plugin 完成后继续：
+
+```typescript
+export default defineNuxtRouteMiddleware(() => {
+  const tenantStore = useTenantStore();
+
+  if (!tenantStore.config && import.meta.client) {
+    // 配置未就绪，等待 plugin 初始化
+    return abortNavigation();
+  }
+});
+```
+
+---
+
+### 3. 前端认证流程（merchant guard + token management）
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant LoginView
+    participant authStore
+    participant API as Merchant Auth API
+    participant Router
+
+    User->>LoginView: 输入邮箱/密码
+    LoginView->>authStore: login(email, password)
+    authStore->>API: POST /merchant/auth/login
+    API-->>authStore: { token, user, merchant }
+    authStore->>authStore: localStorage.setItem('merchant_token', token)
+    authStore->>Router: router.push({ name: 'dashboard' })
+    Router->>Router: beforeEach 守卫验证 isLoggedIn
+    Router-->>User: 跳转到仪表盘
+```
+
+**authStore（Pinia）核心状态：**
+
+```typescript
+export const useAuthStore = defineStore('auth', () => {
+  const token    = ref<string | null>(localStorage.getItem('merchant_token'));
+  const user     = ref<MerchantUser | null>(null);
+  const merchant = ref<Merchant | null>(null);
+
+  const isLoggedIn = computed(() => !!token.value);
+
+  async function login(email: string, password: string) {
+    const res = await authApi.login(email, password);
+    token.value    = res.token;
+    user.value     = res.user;
+    merchant.value = res.merchant;
+    localStorage.setItem('merchant_token', res.token);
+  }
+
+  function logout() {
+    token.value    = null;
+    user.value     = null;
+    merchant.value = null;
+    localStorage.removeItem('merchant_token');
+  }
+
+  return { token, user, merchant, isLoggedIn, login, logout };
+});
+```
+
+**Token 生命周期：**
+
+| 操作 | 说明 |
+|------|------|
+| 登录成功 | Token 写入 localStorage + Pinia state |
+| 页面刷新 | 从 localStorage 恢复 Token（Pinia 初始化时） |
+| 401 响应 | Axios 拦截器清空 Token，跳转登录页 |
+| 主动登出 | 调用 `/merchant/auth/logout` 吊销 Sanctum Token，清空本地 Token |
+
+---
+
+### 4. 站点切换机制（StoreSwitcher → userStore → API）
+
+商户后台支持在多个站点间切换，切换时同步更新当前激活站点上下文：
+
+```mermaid
+sequenceDiagram
+    participant User
+    participant StoreSwitcher
+    participant storeStore
+    participant API
+    participant Components
+
+    User->>StoreSwitcher: 下拉选择目标站点
+    StoreSwitcher->>storeStore: switchStore(storeId)
+    storeStore->>API: GET /merchant/stores/{id}/summary
+    API-->>storeStore: 站点摘要数据
+    storeStore->>storeStore: currentStore.value = store
+    storeStore->>storeStore: localStorage.setItem('current_store_id', id)
+    storeStore-->>Components: 响应式更新（所有订阅组件重新获取数据）
+```
+
+**storeStore（Pinia）：**
+
+```typescript
+export const useStoreStore = defineStore('store', () => {
+  const stores       = ref<Store[]>([]);
+  const currentStore = ref<Store | null>(null);
+
+  async function fetchStores() {
+    stores.value = await storeApi.list();
+    // 恢复上次选择的站点
+    const savedId = localStorage.getItem('current_store_id');
+    if (savedId) {
+      currentStore.value = stores.value.find(s => s.id === +savedId) ?? stores.value[0];
+    } else {
+      currentStore.value = stores.value[0];
+    }
+  }
+
+  async function switchStore(storeId: number) {
+    currentStore.value = stores.value.find(s => s.id === storeId) ?? null;
+    localStorage.setItem('current_store_id', String(storeId));
+  }
+
+  return { stores, currentStore, fetchStores, switchStore };
+});
+```
+
+**StoreSwitcher 组件：**
+
+```vue
+<!-- components/StoreSwitcher.vue -->
+<template>
+  <el-dropdown @command="onSwitch">
+    <span class="store-switcher">
+      {{ storeStore.currentStore?.name ?? '选择站点' }}
+      <el-icon><ArrowDown /></el-icon>
+    </span>
+    <template #dropdown>
+      <el-dropdown-menu>
+        <el-dropdown-item
+          v-for="store in storeStore.stores"
+          :key="store.id"
+          :command="store.id"
+        >
+          <el-badge :type="statusBadge(store.status)" />
+          {{ store.name }} ({{ store.domain }})
+        </el-dropdown-item>
+      </el-dropdown-menu>
+    </template>
+  </el-dropdown>
+</template>
+```
+
+---
+
+### 5. admin-ui 商户管理模块
+
+`admin-ui/` 是平台管理后台，Phase M5 在其中增加了完整的商户管理模块。
+
+**商户管理模块页面结构：**
+
+| 页面 | 路由 | 说明 |
+|------|------|------|
+| `MerchantListView` | `/admin/merchants` | 商户列表（搜索/状态筛选/等级筛选/分页） |
+| `MerchantDetailView` | `/admin/merchants/:id` | 商户详情（5 Tab 布局） |
+| `SettlementReviewView` | `/admin/settlement` | 结算审核页（draft→approved→paid 流转） |
+
+**MerchantDetailView 5 Tab 布局：**
+
+| Tab | 说明 |
+|-----|------|
+| 基本信息 | 商户资质、等级、联系人、注册时间、审核状态 |
+| 站点列表 | 商户名下所有站点卡片（含域名/状态/品类/建站时间）+ 创建站点按钮 |
+| 结算记录 | 历史结算单列表，支持下钻查看各站点明细 |
+| 风控数据 | 风险评分趋势图、5维度评分雷达图、告警历史 |
+| 操作日志 | 管理员对该商户的所有操作记录（审核/状态变更/等级调整等） |
+
+**站点创建 4 步向导：**
+
+```
+Step 1: 基础信息（站点名称/域名/市场/语言/货币）
+    ↓
+Step 2: 品类配置（选择一级/二级品类）
+    ↓
+Step 3: 支付配置（绑定支付账号分组）
+    ↓
+Step 4: 确认创建（预览 + 提交 → 后端调用 StoreProvisioningService）
+```
+
+---
+
+### 附录（Phase M5）：关键文件索引
+
+| 文件 | 说明 |
+|------|------|
+| `merchant-ui/src/router/index.ts` | Vue Router 配置 + 路由守卫 |
+| `merchant-ui/src/stores/authStore.ts` | 商户认证状态（token/user/merchant） |
+| `merchant-ui/src/stores/storeStore.ts` | 站点状态（列表/当前站点/切换） |
+| `merchant-ui/src/components/StoreSwitcher.vue` | 顶部站点切换下拉组件 |
+| `merchant-ui/src/pages/DashboardView.vue` | 仪表盘（ECharts 折线图/饼图） |
+| `merchant-ui/src/pages/ProductListView.vue` | 主商品库管理页 |
+| `merchant-ui/src/pages/OrderListView.vue` | 订单只读聚合列表页 |
+| `merchant-ui/src/pages/SettlementView.vue` | 结算中心页 |
+| `admin-ui/src/pages/MerchantListView.vue` | 平台管理-商户列表 |
+| `admin-ui/src/pages/MerchantDetailView.vue` | 平台管理-商户详情（5Tab） |
+| `admin-ui/src/pages/SettlementReviewView.vue` | 平台管理-结算审核 |
+| `storefront/plugins/tenant.client.ts` | Nuxt 3 多租户初始化插件 |
+| `storefront/composables/useTenant.ts` | 站点配置 composable |
+| `storefront/composables/useCurrency.ts` | 货币切换 composable |
+| `storefront/stores/tenant.ts` | tenantStore（Pinia） |
+| `storefront/middleware/tenant.ts` | 站点配置就绪检查中间件 |
+| `storefront/components/CurrencySwitcher.vue` | 货币切换器组件 |
