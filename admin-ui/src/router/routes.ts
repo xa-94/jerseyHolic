@@ -147,6 +147,20 @@ export const protectedRoutes: RouteRecordRaw[] = [
         meta: { title: '促销活动', requiresAuth: true },
       },
 
+      // 商户管理
+      {
+        path: 'merchant',
+        name: 'MerchantList',
+        component: () => import('@/pages/merchant/index.vue'),
+        meta: { title: '商户管理', icon: 'OfficeBuilding', requiresAuth: true },
+      },
+      {
+        path: 'merchant/:id',
+        name: 'MerchantDetail',
+        component: () => import('@/pages/merchant/detail.vue'),
+        meta: { title: '商户详情', hidden: true, requiresAuth: true },
+      },
+
       // 系统设置
       {
         path: 'setting/general',

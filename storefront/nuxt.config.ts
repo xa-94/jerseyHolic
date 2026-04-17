@@ -8,10 +8,26 @@ export default defineNuxtConfig({
     '@pinia/nuxt',
   ],
 
+  // @pinia/nuxt 集成 pinia-plugin-persistedstate v3
+  pinia: {
+    storesDirs: ['./stores/**'],
+  },
+
   runtimeConfig: {
     public: {
       apiBase: process.env.NUXT_PUBLIC_API_BASE || 'http://localhost:8000/api/v1',
     },
+  },
+
+  // 显式注册插件（顺序：persistedstate → tenant）
+  plugins: [
+    '~/plugins/pinia-persistedstate.ts',
+    '~/plugins/tenant.ts',
+  ],
+
+  // 全局路由中间件
+  router: {
+    middleware: ['tenant'],
   },
 
   i18n: {
@@ -43,6 +59,11 @@ export default defineNuxtConfig({
       redirectOn: 'root',
     },
   },
+
+  css: [
+    '~/assets/css/tailwind.css',
+    '~/assets/css/rtl.css',
+  ],
 
   app: {
     head: {

@@ -80,6 +80,9 @@ const isMobileOpen = ref(false)
             </button>
           </form>
 
+          <!-- 货币切换 -->
+          <CurrencySwitcher />
+
           <!-- 语言切换 -->
           <LanguageSwitcher />
 

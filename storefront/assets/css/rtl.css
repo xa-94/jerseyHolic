@@ -1,0 +1,155 @@
+/* ==========================================================================
+   RTL (Right-to-Left) 样式覆盖
+   适用于阿拉伯语（ar）等 RTL 语言
+   配合 tailwindcss-rtl 插件使用（已在 tailwind.config.ts 中注册）
+   ========================================================================== */
+
+/* --------------------------------------------------------------------------
+   通用方向重置
+   -------------------------------------------------------------------------- */
+[dir="rtl"] {
+  direction: rtl;
+  unicode-bidi: bidi-override;
+}
+
+/* --------------------------------------------------------------------------
+   文本对齐翻转
+   -------------------------------------------------------------------------- */
+[dir="rtl"] .text-left {
+  text-align: right !important;
+}
+
+[dir="rtl"] .text-right {
+  text-align: left !important;
+}
+
+/* --------------------------------------------------------------------------
+   Flex 布局翻转
+   -------------------------------------------------------------------------- */
+[dir="rtl"] .flex-row {
+  flex-direction: row-reverse;
+}
+
+/* 不翻转 flex-row-reverse（本就是反向的） */
+[dir="rtl"] .flex-row-reverse {
+  flex-direction: row;
+}
+
+/* --------------------------------------------------------------------------
+   Margin 逻辑翻转
+   -------------------------------------------------------------------------- */
+[dir="rtl"] .ml-auto {
+  margin-right: auto !important;
+  margin-left: unset !important;
+}
+
+[dir="rtl"] .mr-auto {
+  margin-left: auto !important;
+  margin-right: unset !important;
+}
+
+[dir="rtl"] .ml-1  { margin-right: 0.25rem !important; margin-left: unset !important; }
+[dir="rtl"] .ml-2  { margin-right: 0.5rem !important;  margin-left: unset !important; }
+[dir="rtl"] .ml-3  { margin-right: 0.75rem !important; margin-left: unset !important; }
+[dir="rtl"] .ml-4  { margin-right: 1rem !important;    margin-left: unset !important; }
+[dir="rtl"] .mr-1  { margin-left: 0.25rem !important;  margin-right: unset !important; }
+[dir="rtl"] .mr-2  { margin-left: 0.5rem !important;   margin-right: unset !important; }
+[dir="rtl"] .mr-3  { margin-left: 0.75rem !important;  margin-right: unset !important; }
+[dir="rtl"] .mr-4  { margin-left: 1rem !important;     margin-right: unset !important; }
+
+/* --------------------------------------------------------------------------
+   Padding 逻辑翻转
+   -------------------------------------------------------------------------- */
+[dir="rtl"] .pl-1  { padding-right: 0.25rem !important; padding-left: unset !important; }
+[dir="rtl"] .pl-2  { padding-right: 0.5rem !important;  padding-left: unset !important; }
+[dir="rtl"] .pl-3  { padding-right: 0.75rem !important; padding-left: unset !important; }
+[dir="rtl"] .pl-4  { padding-right: 1rem !important;    padding-left: unset !important; }
+[dir="rtl"] .pr-1  { padding-left: 0.25rem !important;  padding-right: unset !important; }
+[dir="rtl"] .pr-2  { padding-left: 0.5rem !important;   padding-right: unset !important; }
+[dir="rtl"] .pr-3  { padding-left: 0.75rem !important;  padding-right: unset !important; }
+[dir="rtl"] .pr-4  { padding-left: 1rem !important;     padding-right: unset !important; }
+
+/* --------------------------------------------------------------------------
+   Inset（定位）翻转
+   -------------------------------------------------------------------------- */
+[dir="rtl"] .left-0  { right: 0 !important;    left: unset !important; }
+[dir="rtl"] .right-0 { left: 0 !important;     right: unset !important; }
+[dir="rtl"] .-left-2 { right: -0.5rem !important; left: unset !important; }
+[dir="rtl"] .-right-2{ left: -0.5rem !important;  right: unset !important; }
+
+/* --------------------------------------------------------------------------
+   Border Radius 翻转（rounded-l / rounded-r）
+   -------------------------------------------------------------------------- */
+[dir="rtl"] .rounded-l-full {
+  border-radius: 0 9999px 9999px 0;
+}
+
+[dir="rtl"] .rounded-r-full {
+  border-radius: 9999px 0 0 9999px;
+}
+
+/* --------------------------------------------------------------------------
+   导航 & 菜单
+   -------------------------------------------------------------------------- */
+[dir="rtl"] .nav-item {
+  margin-right: 0;
+  margin-left: 0.5rem;
+}
+
+/* 下拉菜单弹出方向 */
+[dir="rtl"] .dropdown-menu {
+  left: unset;
+  right: 0;
+}
+
+/* --------------------------------------------------------------------------
+   表单输入
+   -------------------------------------------------------------------------- */
+[dir="rtl"] input,
+[dir="rtl"] textarea,
+[dir="rtl"] select {
+  text-align: right;
+}
+
+[dir="rtl"] input[type="number"],
+[dir="rtl"] input[type="tel"] {
+  /* 数字/电话输入保持 LTR 以正确显示数字序列 */
+  direction: ltr;
+  text-align: left;
+}
+
+/* --------------------------------------------------------------------------
+   图标翻转（方向性箭头、chevron 等）
+   使用 .icon-flip 类手动标记需要翻转的图标
+   -------------------------------------------------------------------------- */
+[dir="rtl"] .icon-arrow,
+[dir="rtl"] .icon-flip {
+  transform: scaleX(-1);
+}
+
+/* --------------------------------------------------------------------------
+   购物车徽章位置翻转
+   Header.vue 中使用了 -end-2（逻辑属性，tailwindcss-rtl 会自动处理）
+   以下是备用覆盖
+   -------------------------------------------------------------------------- */
+[dir="rtl"] .cart-badge {
+  right: unset;
+  left: -0.5rem;
+}
+
+/* --------------------------------------------------------------------------
+   价格显示：货币符号在右侧（部分阿拉伯地区习惯）
+   可选：使用 .price-rtl class 手动触发
+   -------------------------------------------------------------------------- */
+[dir="rtl"] .price-display {
+  direction: ltr; /* 价格数字保持 LTR */
+  display: inline-block;
+}
+
+/* --------------------------------------------------------------------------
+   Transition 动画（侧边栏从右滑入）
+   -------------------------------------------------------------------------- */
+[dir="rtl"] .slide-enter-from,
+[dir="rtl"] .slide-leave-to {
+  transform: translateX(8px);
+}
