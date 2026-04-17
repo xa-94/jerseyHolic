@@ -60,6 +60,7 @@ class Product extends TenantModel
         'image', 'minimum', 'sort_order', 'status',
         'is_featured', 'requires_shipping', 'merchant_id',
         'viewed', 'sold', 'upc', 'ean', 'isbn', 'mpn',
+        'sync_source_id', 'synced_at',
     ];
 
     protected $casts = [
@@ -83,6 +84,8 @@ class Product extends TenantModel
         'merchant_id'      => 'integer',
         'viewed'           => 'integer',
         'sold'             => 'integer',
+        'sync_source_id'   => 'integer',
+        'synced_at'        => 'datetime',
     ];
 
     /* ----------------------------------------------------------------

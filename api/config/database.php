@@ -36,6 +36,21 @@ return [
             'engine'    => 'InnoDB',
         ],
 
+        // Merchant database — 商户专属库（jerseyholic_merchant_{id}）由代码动态切换
+        'merchant' => [
+            'driver'    => 'mysql',
+            'host'      => env('DB_HOST', '127.0.0.1'),
+            'port'      => env('DB_PORT', '3306'),
+            'database'  => null, // 由 MerchantContext 动态设置
+            'username'  => env('DB_USERNAME', 'root'),
+            'password'  => env('DB_PASSWORD', ''),
+            'charset'   => 'utf8mb4',
+            'collation' => 'utf8mb4_unicode_ci',
+            'prefix'    => '',
+            'strict'    => true,
+            'engine'    => 'InnoDB',
+        ],
+
         // 原有默认连接（保持兼容）
         'mysql' => [
             'driver'    => 'mysql',

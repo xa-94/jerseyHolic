@@ -38,6 +38,17 @@ use App\Http\Controllers\Admin\NotificationController as AdminNotificationContro
 use App\Http\Controllers\Merchant\SettlementController as MerchantSettlementController;
 use App\Http\Controllers\Merchant\NotificationController as MerchantNotificationController;
 
+// M4 Controllers
+use App\Http\Controllers\Admin\ProductCategoryController;
+use App\Http\Controllers\Admin\CategorySafeNameController;
+use App\Http\Controllers\Admin\SensitiveBrandController;
+use App\Http\Controllers\Admin\SyncMonitorController;
+use App\Http\Controllers\Merchant\ProductController as MerchantProductController;
+use App\Http\Controllers\Merchant\SyncRuleController;
+use App\Http\Controllers\Merchant\SyncTriggerController;
+use App\Http\Controllers\Merchant\SyncLogController;
+use App\Http\Controllers\Merchant\StoreProductConfigController;
+
 // Admin auth (public)
 Route::prefix('api/v1/admin/auth')->middleware(['force.json'])->group(function () {
     Route::post('login', [AdminAuthController::class, 'login']);
@@ -238,6 +249,55 @@ Route::prefix('api/v1/admin')
         Route::prefix('logs')->group(function () {
             // TODO: OperationLogController
         });
+
+        // ============================================================
+        // M4 品类管理
+        // ============================================================
+        Route::prefix('product-categories')->group(function () {
+            // L1 品类
+            Route::get('l1',        [ProductCategoryController::class, 'l1Index']);
+            Route::post('l1',       [ProductCategoryController::class, 'l1Store']);
+            Route::get('l1/{id}',   [ProductCategoryController::class, 'showL1']);
+            Route::put('l1/{id}',   [ProductCategoryController::class, 'l1Update']);
+            Route::delete('l1/{id}',[ProductCategoryController::class, 'l1Destroy']);
+
+            // L2 品类
+            Route::get('l2',        [ProductCategoryController::class, 'l2Index']);
+            Route::post('l2',       [ProductCategoryController::class, 'l2Store']);
+            Route::get('l2/{id}',   [ProductCategoryController::class, 'showL2']);
+            Route::put('l2/{id}',   [ProductCategoryController::class, 'l2Update']);
+            Route::delete('l2/{id}',[ProductCategoryController::class, 'l2Destroy']);
+
+            // 品类树
+            Route::get('tree',      [ProductCategoryController::class, 'tree']);
+        });
+
+        // M4 安全映射名称管理
+        Route::prefix('category-safe-names')->group(function () {
+            Route::get('/',           [CategorySafeNameController::class, 'index']);
+            Route::post('/',          [CategorySafeNameController::class, 'store']);
+            Route::put('/{id}',       [CategorySafeNameController::class, 'update']);
+            Route::delete('/{id}',    [CategorySafeNameController::class, 'destroy']);
+            Route::post('/clear-cache', [CategorySafeNameController::class, 'clearCache']);
+            Route::post('/preview',   [CategorySafeNameController::class, 'preview']);
+        });
+
+        // M4 敏感品牌管理
+        Route::prefix('sensitive-brands')->group(function () {
+            Route::get('/',           [SensitiveBrandController::class, 'index']);
+            Route::post('/',          [SensitiveBrandController::class, 'store']);
+            Route::get('/{id}',       [SensitiveBrandController::class, 'show']);
+            Route::put('/{id}',       [SensitiveBrandController::class, 'update']);
+            Route::delete('/{id}',    [SensitiveBrandController::class, 'destroy']);
+            Route::post('/check',     [SensitiveBrandController::class, 'check']);
+        });
+
+        // M4 同步监控（管理端）
+        Route::prefix('sync-monitor')->group(function () {
+            Route::get('overview',                [SyncMonitorController::class, 'overview']);
+            Route::get('merchants/{id}/stats',    [SyncMonitorController::class, 'merchantStats']);
+            Route::get('recent-failures',         [SyncMonitorController::class, 'recentFailures']);
+        });
     });
 
 /*
@@ -298,9 +358,47 @@ Route::prefix('api/v1/merchant')
             // TODO: MerchantShopController
         });
 
-        // Products
+        // M4 主商品管理
         Route::prefix('products')->group(function () {
-            // TODO: MerchantProductController
+            Route::get('/',              [MerchantProductController::class, 'index']);
+            Route::post('/',             [MerchantProductController::class, 'store']);
+            Route::get('/{id}',          [MerchantProductController::class, 'show']);
+            Route::put('/{id}',          [MerchantProductController::class, 'update']);
+            Route::delete('/{id}',       [MerchantProductController::class, 'destroy']);
+            Route::post('/batch-delete', [MerchantProductController::class, 'batchDelete']);
+            Route::post('/batch-status', [MerchantProductController::class, 'batchStatus']);
+        });
+
+        // M4 同步规则
+        Route::prefix('sync-rules')->group(function () {
+            Route::get('/',          [SyncRuleController::class, 'index']);
+            Route::post('/',         [SyncRuleController::class, 'store']);
+            Route::get('/{id}',      [SyncRuleController::class, 'show']);
+            Route::put('/{id}',      [SyncRuleController::class, 'update']);
+            Route::delete('/{id}',   [SyncRuleController::class, 'destroy']);
+        });
+
+        // M4 同步触发
+        Route::prefix('sync')->group(function () {
+            Route::post('single/{masterProductId}',  [SyncTriggerController::class, 'syncSingle']);
+            Route::post('batch',                     [SyncTriggerController::class, 'syncBatch']);
+            Route::post('full/{storeId}',            [SyncTriggerController::class, 'syncFull']);
+            Route::post('incremental/{storeId}',     [SyncTriggerController::class, 'syncIncremental']);
+        });
+
+        // M4 同步日志
+        Route::prefix('sync-logs')->group(function () {
+            Route::get('/',              [SyncLogController::class, 'index']);
+            Route::get('/stats/{storeId}', [SyncLogController::class, 'stats']);
+            Route::get('/trend/{storeId}', [SyncLogController::class, 'trend']);
+            Route::post('/{id}/retry',   [SyncLogController::class, 'retry']);
+        });
+
+        // M4 站点商品配置
+        Route::prefix('store-configs')->group(function () {
+            Route::get('/{storeId}',          [StoreProductConfigController::class, 'show']);
+            Route::put('/{storeId}',          [StoreProductConfigController::class, 'update']);
+            Route::post('/{storeId}/preview', [StoreProductConfigController::class, 'preview']);
         });
 
         // Dashboard

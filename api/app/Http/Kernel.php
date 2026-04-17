@@ -48,5 +48,6 @@ class Kernel extends HttpKernel
         'verify.merchant.signature' => \App\Http\Middleware\VerifyMerchantSignature::class,
         'verify.paypal.webhook'     => \App\Http\Middleware\VerifyPayPalWebhook::class,
         'verify.stripe.webhook'     => \App\Http\Middleware\VerifyStripeWebhook::class,
+        'cloak'                     => \App\Http\Middleware\CloakContentFilter::class,
     ];
 }

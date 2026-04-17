@@ -1,8 +1,11 @@
 <?php
 
+declare(strict_types=1);
+
 namespace App\Services;
 
 use App\Models\Central\Merchant;
+use Illuminate\Support\Facades\Config;
 use Illuminate\Support\Facades\DB;
 use Illuminate\Support\Facades\Log;
 
@@ -13,6 +16,7 @@ use Illuminate\Support\Facades\Log;
  * - 创建数据库并初始化核心表（master_products, master_product_translations, sync_rules）
  * - 销毁数据库（商户封禁时可用）
  * - 检查数据库是否存在
+ * - 切换 merchant 数据库连接上下文
  *
  * 所有 DDL 语句在 central 连接对应的 MySQL 实例上执行，
  * 使用 DB::statement() 原生 SQL，不依赖 ORM。
@@ -59,23 +63,31 @@ class MerchantDatabaseService
             // 2. 创建 master_products 表
             DB::connection('central')->statement("
                 CREATE TABLE IF NOT EXISTS `{$dbName}`.`master_products` (
-                    `id`               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-                    `sku`              VARCHAR(100)    NOT NULL COMMENT 'SKU编码',
-                    `name`             VARCHAR(255)    NOT NULL COMMENT '商品名称',
-                    `description`      LONGTEXT        NULL     COMMENT '商品描述',
-                    `brand`            VARCHAR(100)    NULL     COMMENT '品牌',
-                    `safe_name`        VARCHAR(255)    NULL     COMMENT '审核通过的安全名称',
-                    `safe_description` LONGTEXT        NULL     COMMENT '审核通过的安全描述',
-                    `images`           JSON            NULL     COMMENT '原始图片URL列表',
-                    `safe_images`      JSON            NULL     COMMENT '审核通过的图片URL列表',
-                    `price`            DECIMAL(10, 2)  NOT NULL DEFAULT 0.00 COMMENT '售价',
-                    `cost`             DECIMAL(10, 2)  NULL     COMMENT '成本价',
-                    `status`           TINYINT         NOT NULL DEFAULT 0 COMMENT '0=draft,1=active,2=inactive',
-                    `created_at`       TIMESTAMP       NULL,
-                    `updated_at`       TIMESTAMP       NULL,
+                    `id`              BIGINT UNSIGNED  NOT NULL AUTO_INCREMENT,
+                    `sku`             VARCHAR(100)     NOT NULL COMMENT 'SKU编码',
+                    `name`            VARCHAR(255)     NOT NULL COMMENT '默认名称（英文）',
+                    `description`     TEXT             NULL     COMMENT '默认描述',
+                    `category_l1_id`  BIGINT UNSIGNED  NULL     COMMENT 'Central DB L1品类ID',
+                    `category_l2_id`  BIGINT UNSIGNED  NULL     COMMENT 'Central DB L2品类ID',
+                    `is_sensitive`    TINYINT(1)       NOT NULL DEFAULT 0 COMMENT '是否特货',
+                    `base_price`      DECIMAL(10, 2)   NOT NULL COMMENT '基础价格',
+                    `currency`        VARCHAR(3)       NOT NULL DEFAULT 'USD' COMMENT '币种',
+                    `images`          JSON             NULL     COMMENT '图片URL数组',
+                    `attributes`      JSON             NULL     COMMENT '商品属性（颜色、尺码等）',
+                    `variants`        JSON             NULL     COMMENT '变体信息',
+                    `weight`          DECIMAL(8, 2)    NULL     COMMENT '重量(g)',
+                    `dimensions`      JSON             NULL     COMMENT '尺寸 {length,width,height}',
+                    `status`          TINYINT          NOT NULL DEFAULT 1 COMMENT '1=active,0=inactive,2=draft',
+                    `sync_status`     VARCHAR(20)      NOT NULL DEFAULT 'pending' COMMENT 'pending/syncing/synced/failed',
+                    `last_synced_at`  TIMESTAMP        NULL     COMMENT '最后同步时间',
+                    `created_at`      TIMESTAMP        NULL,
+                    `updated_at`      TIMESTAMP        NULL,
                     PRIMARY KEY (`id`),
                     UNIQUE KEY `uq_sku` (`sku`),
-                    KEY `idx_status` (`status`)
+                    KEY `idx_category_l1` (`category_l1_id`),
+                    KEY `idx_category_l2` (`category_l2_id`),
+                    KEY `idx_status` (`status`),
+                    KEY `idx_sync_status` (`sync_status`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                   COMMENT='商户主商品库'
             ");
@@ -83,16 +95,21 @@ class MerchantDatabaseService
             // 3. 创建 master_product_translations 表
             DB::connection('central')->statement("
                 CREATE TABLE IF NOT EXISTS `{$dbName}`.`master_product_translations` (
-                    `id`          BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-                    `product_id`  BIGINT UNSIGNED NOT NULL COMMENT '关联 master_products.id',
-                    `locale`      VARCHAR(10)     NOT NULL COMMENT '语言代码，如 en, zh, es',
-                    `name`        VARCHAR(255)    NOT NULL COMMENT '翻译后商品名称',
-                    `description` LONGTEXT        NULL     COMMENT '翻译后商品描述',
-                    `created_at`  TIMESTAMP       NULL,
-                    `updated_at`  TIMESTAMP       NULL,
+                    `id`                 BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    `master_product_id`  BIGINT UNSIGNED NOT NULL COMMENT '关联 master_products.id',
+                    `locale`             VARCHAR(10)     NOT NULL COMMENT '语言代码，如 en, zh, de',
+                    `name`               VARCHAR(255)    NOT NULL COMMENT '翻译后商品名称',
+                    `description`        TEXT            NULL     COMMENT '翻译后商品描述',
+                    `meta_title`         VARCHAR(255)    NULL     COMMENT 'SEO标题',
+                    `meta_description`   TEXT            NULL     COMMENT 'SEO描述',
+                    `created_at`         TIMESTAMP       NULL,
+                    `updated_at`         TIMESTAMP       NULL,
                     PRIMARY KEY (`id`),
-                    UNIQUE KEY `uq_product_locale` (`product_id`, `locale`),
-                    KEY `idx_locale` (`locale`)
+                    UNIQUE KEY `uq_product_locale` (`master_product_id`, `locale`),
+                    KEY `idx_locale` (`locale`),
+                    CONSTRAINT `fk_translation_product`
+                        FOREIGN KEY (`master_product_id`) REFERENCES `{$dbName}`.`master_products` (`id`)
+                        ON DELETE CASCADE
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
                   COMMENT='商品多语言翻译'
             ");
@@ -100,15 +117,19 @@ class MerchantDatabaseService
             // 4. 创建 sync_rules 表
             DB::connection('central')->statement("
                 CREATE TABLE IF NOT EXISTS `{$dbName}`.`sync_rules` (
-                    `id`               BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-                    `name`             VARCHAR(100)    NOT NULL COMMENT '规则名称',
-                    `source_type`      VARCHAR(50)     NOT NULL COMMENT '数据来源类型',
-                    `target_store_ids` JSON            NULL     COMMENT '目标店铺ID列表',
-                    `sync_fields`      JSON            NULL     COMMENT '需同步的字段列表',
-                    `auto_sync`        TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '是否自动同步',
-                    `status`           TINYINT         NOT NULL DEFAULT 1 COMMENT '0=disabled,1=enabled',
-                    `created_at`       TIMESTAMP       NULL,
-                    `updated_at`       TIMESTAMP       NULL,
+                    `id`                BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+                    `name`              VARCHAR(100)    NOT NULL COMMENT '规则名称',
+                    `target_store_ids`  JSON            NOT NULL COMMENT '目标站点ID列表',
+                    `excluded_store_ids` JSON           NULL     COMMENT '排除站点',
+                    `sync_fields`       JSON            NOT NULL COMMENT '要同步的字段列表',
+                    `price_strategy`    VARCHAR(20)     NOT NULL DEFAULT 'fixed' COMMENT 'fixed/multiplier/custom',
+                    `price_multiplier`  DECIMAL(5, 2)   NOT NULL DEFAULT 1.00 COMMENT '价格乘数',
+                    `auto_sync`         TINYINT(1)      NOT NULL DEFAULT 0 COMMENT '自动同步开关',
+                    `status`            TINYINT         NOT NULL DEFAULT 1 COMMENT '1=enabled,0=disabled',
+                    `last_synced_at`    TIMESTAMP       NULL     COMMENT '最后同步时间',
+                    `sync_interval_hours` INT           NOT NULL DEFAULT 24 COMMENT '同步间隔小时数',
+                    `created_at`        TIMESTAMP       NULL,
+                    `updated_at`        TIMESTAMP       NULL,
                     PRIMARY KEY (`id`),
                     KEY `idx_status` (`status`)
                 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci
@@ -192,5 +213,47 @@ class MerchantDatabaseService
     public function getDatabaseName(Merchant $merchant): string
     {
         return self::DB_PREFIX . $merchant->id;
+    }
+
+    /**
+     * 切换 merchant 数据库连接到指定商户的数据库
+     *
+     * 设置后，所有使用 'merchant' 连接的 Model（MerchantModel 子类）
+     * 将自动连接到该商户的独立数据库。
+     *
+     * @param  Merchant $merchant
+     * @return void
+     */
+    public function setMerchantConnection(Merchant $merchant): void
+    {
+        $dbName = $this->getDatabaseName($merchant);
+
+        Config::set('database.connections.merchant.database', $dbName);
+
+        // 清除已缓存的连接，强制下次查询使用新配置
+        DB::purge('merchant');
+    }
+
+    /**
+     * 在指定商户数据库上下文中执行回调
+     *
+     * 执行完毕后自动恢复原连接配置。
+     *
+     * @template T
+     * @param  Merchant $merchant
+     * @param  callable(): T $callback
+     * @return T
+     */
+    public function run(Merchant $merchant, callable $callback): mixed
+    {
+        $previousDb = Config::get('database.connections.merchant.database');
+
+        try {
+            $this->setMerchantConnection($merchant);
+            return $callback();
+        } finally {
+            Config::set('database.connections.merchant.database', $previousDb);
+            DB::purge('merchant');
+        }
     }
 }

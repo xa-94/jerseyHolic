@@ -49,6 +49,7 @@ return [
         App\Providers\RouteServiceProvider::class,
         App\Providers\ProductMappingServiceProvider::class,
         App\Providers\PaymentServiceProvider::class,
+        App\Providers\ProductServiceProvider::class,
     ],
     'aliases' => Illuminate\Support\Facades\Facade::defaultAliases()->merge([
         // Custom aliases
